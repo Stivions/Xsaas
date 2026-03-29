@@ -54,8 +54,9 @@ export function createAuthRouter(config) {
   };
 
   router.post("/register", async (req, res) => {
-    const { email = "", password = "", fullName = "", workspaceName = "" } = req.body || {};
+    const { email = "", password = "", fullName = "", name = "", workspaceName = "" } = req.body || {};
     const normalizedEmail = String(email).trim().toLowerCase();
+    const resolvedFullName = String(fullName || name).trim();
 
     if (!normalizedEmail || !password || password.length < 8) {
       return res.status(400).json({ error: "Email and a password with at least 8 characters are required." });
@@ -70,10 +71,10 @@ export function createAuthRouter(config) {
     const user = await User.create({
       email: normalizedEmail,
       passwordHash,
-      fullName: String(fullName).trim()
+      fullName: resolvedFullName
     });
 
-    const baseSlug = makeSlug(workspaceName || fullName || normalizedEmail.split("@")[0] || "workspace");
+    const baseSlug = makeSlug(workspaceName || resolvedFullName || normalizedEmail.split("@")[0] || "workspace");
     let slug = baseSlug || `workspace-${String(user._id).slice(-6)}`;
     let counter = 1;
     while (await Workspace.findOne({ slug })) {
@@ -83,7 +84,7 @@ export function createAuthRouter(config) {
 
     const workspace = await Workspace.create({
       ownerUserId: user._id,
-      name: String(workspaceName || `${fullName || "My"} Workspace`).trim(),
+      name: String(workspaceName || `${resolvedFullName || "My"} Workspace`).trim(),
       slug,
       plan: "starter"
     });

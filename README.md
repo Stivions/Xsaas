@@ -43,7 +43,7 @@ Phase 3:
 
 ## Suggested stack
 
-- frontend: separate app generated elsewhere, then connected here
+- frontend: Next.js app inside `frontend`
 - backend: Node + Express
 - database: MongoDB Atlas free tier to start
 - deploy: Render for early validation
@@ -53,11 +53,22 @@ Phase 3:
 
 ```bash
 npm install
+cd frontend && npm install && cd ..
 cp .env.example .env
+npm --prefix frontend run dev
 npm run dev
 ```
 
 The API starts on `http://localhost:4000`.
+The frontend starts on `http://localhost:3000`.
+
+## Useful scripts
+
+```bash
+npm run dev:api
+npm run dev:web
+npm run check
+```
 
 ## Main routes
 
@@ -77,5 +88,6 @@ The API starts on `http://localhost:4000`.
 - `src/lib/db.js`: Mongo connection
 - `src/models`: core SaaS models
 - `src/routes`: auth, billing, health
+- `frontend`: Next.js marketing site + auth dashboard
 - `docs/FOUNDATION.md`: business/product base
 - `docs/FRONTEND_PROMPT.md`: copy-paste prompt for building the frontend elsewhere
