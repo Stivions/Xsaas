@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import {
@@ -66,6 +66,7 @@ export default function DashboardLayout({
   const { t } = useLanguage()
   const [session, setSession] = useState<SessionPayload | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const handingOffOAuthRef = useRef(false)
 
   const navigation = useMemo(
     () => [
@@ -83,6 +84,29 @@ export default function DashboardLayout({
     ],
     [t]
   )
+
+  useEffect(() => {
+    if (typeof window === "undefined" || handingOffOAuthRef.current) {
+      return
+    }
+
+    const currentUrl = new URL(window.location.href)
+    const code = currentUrl.searchParams.get("code")
+    const state = currentUrl.searchParams.get("state")
+    const error = currentUrl.searchParams.get("error")
+    const hasOAuthParams = Boolean(code && state) || Boolean(error)
+
+    if (!window.opener || !hasOAuthParams) {
+      return
+    }
+
+    handingOffOAuthRef.current = true
+    const callbackUrl = new URL("/api/x/connect/callback", window.location.origin)
+    currentUrl.searchParams.forEach((value, key) => {
+      callbackUrl.searchParams.set(key, value)
+    })
+    window.location.replace(callbackUrl.toString())
+  }, [pathname])
 
   useEffect(() => {
     let isMounted = true

@@ -13,8 +13,14 @@ function popupResponse(origin: string, status: string) {
       const payload = ${JSON.stringify({ type: "xsaas-x-connect", status })};
       if (window.opener && !window.opener.closed) {
         window.opener.postMessage(payload, ${JSON.stringify(origin)});
+        try { window.opener.focus(); } catch {}
       }
       window.close();
+      setTimeout(() => {
+        if (!window.closed) {
+          window.location.replace(${JSON.stringify(`${origin}/dashboard/settings?x=${status}`)});
+        }
+      }, 250);
     </script>
   </body>
 </html>`

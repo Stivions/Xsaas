@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -115,6 +115,7 @@ export default function SettingsPage() {
   const [isDisconnecting, setIsDisconnecting] = useState(false)
   const [isConnectingX, setIsConnectingX] = useState(false)
   const [statusMessage, setStatusMessage] = useState("")
+  const popupRef = useRef<Window | null>(null)
 
   async function loadData() {
     const [workspaceResponse, billingResponse, automationResponse, xStatusResponse] = await Promise.all([
@@ -186,6 +187,10 @@ export default function SettingsPage() {
         return
       }
 
+      if (popupRef.current && !popupRef.current.closed) {
+        popupRef.current.close()
+      }
+      popupRef.current = null
       setIsConnectingX(false)
 
       if (payload.status === "connected") {
@@ -326,11 +331,15 @@ export default function SettingsPage() {
     }
 
     setIsConnectingX(true)
+    popupRef.current = popup
     popup.focus()
 
     const watcher = window.setInterval(() => {
       if (popup.closed) {
         window.clearInterval(watcher)
+        if (popupRef.current === popup) {
+          popupRef.current = null
+        }
         setIsConnectingX(false)
       }
     }, 500)
