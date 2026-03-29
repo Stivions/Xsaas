@@ -10,7 +10,6 @@ import {
   FileText,
   Home,
   LogOut,
-  Plus,
   Settings,
   Zap,
 } from "lucide-react"
@@ -179,16 +178,13 @@ export default function DashboardLayout({
                   <DropdownMenuLabel>{t.dashboard.workspaces}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {workspaces.map((workspace) => (
-                    <DropdownMenuItem key={workspace.id}>
-                      <Building2 className="mr-2 size-4" />
-                      {workspace.name}
+                    <DropdownMenuItem key={workspace.id} asChild>
+                      <Link href="/dashboard/settings">
+                        <Building2 className="mr-2 size-4" />
+                        {workspace.name}
+                      </Link>
                     </DropdownMenuItem>
                   ))}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem>
-                    <Plus className="mr-2 size-4" />
-                    {t.dashboard.createWorkspace}
-                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -267,18 +263,22 @@ export default function DashboardLayout({
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
-        <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-background px-6">
-          <SidebarTrigger />
-          <Separator orientation="vertical" className="h-6" />
-          <div className="flex flex-1 items-center justify-between">
-            <h1 className="text-lg font-semibold">{pageTitle}</h1>
-            <div className="flex items-center gap-2">
-              <ThemeToggle variant="outline" />
-              <LanguageToggle variant="outline" />
+        <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
+          <div className="mx-auto flex h-14 w-full max-w-7xl items-center gap-4 px-6 lg:px-8">
+            <SidebarTrigger />
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex flex-1 items-center justify-between gap-4">
+              <h1 className="text-lg font-semibold">{pageTitle}</h1>
+              <div className="flex items-center gap-2">
+                <ThemeToggle variant="outline" />
+                <LanguageToggle variant="outline" />
+              </div>
             </div>
           </div>
         </header>
-        <main className="flex-1 p-6">{children}</main>
+        <main className="flex-1 px-6 py-6 lg:px-8 lg:py-8">
+          <div className="mx-auto w-full max-w-7xl">{children}</div>
+        </main>
       </SidebarInset>
     </SidebarProvider>
   )

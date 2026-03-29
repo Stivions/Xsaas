@@ -332,13 +332,13 @@ function Footer() {
             <span className="text-xl font-bold tracking-tight">Xsaas</span>
           </div>
           <nav className="flex flex-wrap items-center justify-center gap-6">
-            <Link href="#" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
+            <Link href="/privacy" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
               {t.landing.footer.privacy}
             </Link>
-            <Link href="#" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
+            <Link href="/terms" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
               {t.landing.footer.terms}
             </Link>
-            <Link href="#" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
+            <Link href="/support" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
               {t.landing.footer.support}
             </Link>
           </nav>

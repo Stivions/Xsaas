@@ -36,7 +36,8 @@ export default function RegisterPage() {
         throw new Error(data.error || "Registration failed")
       }
 
-      router.push("/dashboard")
+      router.replace("/dashboard")
+      router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong")
     } finally {
@@ -45,9 +46,9 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="border-b">
-        <div className="container flex h-16 items-center">
+    <div className="flex min-h-screen flex-col bg-background">
+      <header className="border-b bg-background/95 backdrop-blur">
+        <div className="mx-auto flex h-16 w-full max-w-6xl items-center px-6 lg:px-8">
           <Link href="/" className="flex items-center gap-2">
             <div className="flex size-8 items-center justify-center rounded-lg bg-foreground">
               <span className="text-sm font-bold text-background">X</span>
@@ -56,7 +57,7 @@ export default function RegisterPage() {
           </Link>
         </div>
       </header>
-      <main className="flex flex-1 items-center justify-center px-4 py-12">
+      <main className="flex flex-1 items-center justify-center px-6 py-12 lg:px-8">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl">Create your account</CardTitle>
@@ -118,11 +119,11 @@ export default function RegisterPage() {
               </p>
               <p className="text-center text-xs text-muted-foreground">
                 By creating an account, you agree to our{" "}
-                <Link href="#" className="underline hover:text-foreground">
+                <Link href="/terms" className="underline hover:text-foreground">
                   Terms
                 </Link>{" "}
                 and{" "}
-                <Link href="#" className="underline hover:text-foreground">
+                <Link href="/privacy" className="underline hover:text-foreground">
                   Privacy Policy
                 </Link>
               </p>

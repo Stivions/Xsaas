@@ -35,7 +35,8 @@ export default function LoginPage() {
         throw new Error(data.error || "Invalid credentials")
       }
 
-      router.push("/dashboard")
+      router.replace("/dashboard")
+      router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong")
     } finally {
@@ -44,9 +45,9 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="border-b">
-        <div className="container flex h-16 items-center">
+    <div className="flex min-h-screen flex-col bg-background">
+      <header className="border-b bg-background/95 backdrop-blur">
+        <div className="mx-auto flex h-16 w-full max-w-6xl items-center px-6 lg:px-8">
           <Link href="/" className="flex items-center gap-2">
             <div className="flex size-8 items-center justify-center rounded-lg bg-foreground">
               <span className="text-sm font-bold text-background">X</span>
@@ -55,7 +56,7 @@ export default function LoginPage() {
           </Link>
         </div>
       </header>
-      <main className="flex flex-1 items-center justify-center px-4 py-12">
+      <main className="flex flex-1 items-center justify-center px-6 py-12 lg:px-8">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl">Welcome back</CardTitle>
@@ -82,7 +83,7 @@ export default function LoginPage() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password">Password</Label>
-                  <Link href="#" className="text-sm text-muted-foreground hover:text-foreground">
+                  <Link href="/forgot-password" className="text-sm text-muted-foreground hover:text-foreground">
                     Forgot password?
                   </Link>
                 </div>
