@@ -68,10 +68,19 @@ export function createAuthRouter(config) {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
+    const baseUsername = makeSlug(resolvedFullName || normalizedEmail.split("@")[0] || "member");
+    let username = baseUsername || `member-${Date.now()}`;
+    let usernameCounter = 1;
+    while (await User.findOne({ username })) {
+      usernameCounter += 1;
+      username = `${baseUsername || "member"}-${usernameCounter}`;
+    }
+
     const user = await User.create({
       email: normalizedEmail,
       passwordHash,
-      fullName: resolvedFullName
+      fullName: resolvedFullName,
+      username
     });
 
     const baseSlug = makeSlug(workspaceName || resolvedFullName || normalizedEmail.split("@")[0] || "workspace");

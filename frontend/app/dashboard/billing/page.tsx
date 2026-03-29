@@ -1,26 +1,24 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { useSearchParams } from "next/navigation"
+import { Check, CreditCard, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
-import { Check, CreditCard, Download, Zap } from "lucide-react"
-
-const invoices = [
-  { id: "INV-001", date: "Mar 1, 2026", amount: "$0.00", status: "Paid" },
-  { id: "INV-002", date: "Feb 1, 2026", amount: "$0.00", status: "Paid" },
-  { id: "INV-003", date: "Jan 1, 2026", amount: "$0.00", status: "Paid" },
-]
+import { useLanguage } from "@/lib/language-context"
+import { getPlanUi, type PlanKey } from "@/lib/plan-ui"
 
 type BillingPayload = {
   currentPlan?: string
+  paypal?: {
+    webhookConfigured?: boolean
+  }
   plans?: Array<{
-    id: string
-    name: string
+    id: PlanKey
     price: number
-    features: string[]
+    providerPlanId?: string
     current?: boolean
   }>
   usage?: {
@@ -30,25 +28,29 @@ type BillingPayload = {
 }
 
 export default function BillingPage() {
+  const searchParams = useSearchParams()
+  const { language, t } = useLanguage()
   const [billing, setBilling] = useState<BillingPayload | null>(null)
   const [isLoadingPage, setIsLoadingPage] = useState(true)
   const [isUpgrading, setIsUpgrading] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState("")
 
+  async function loadBilling() {
+    const response = await fetch("/api/billing/config", { cache: "no-store" })
+    if (!response.ok) {
+      return
+    }
+
+    const data = await response.json()
+    setBilling(data)
+  }
+
   useEffect(() => {
     let isMounted = true
 
-    async function loadBilling() {
+    async function run() {
       try {
-        const response = await fetch("/api/billing/config", { cache: "no-store" })
-        if (!response.ok) {
-          return
-        }
-
-        const data = await response.json()
-        if (isMounted) {
-          setBilling(data)
-        }
+        await loadBilling()
       } finally {
         if (isMounted) {
           setIsLoadingPage(false)
@@ -56,77 +58,129 @@ export default function BillingPage() {
       }
     }
 
-    void loadBilling()
+    void run()
 
     return () => {
       isMounted = false
     }
   }, [])
 
-  const handleUpgrade = async (planName: string) => {
-    setIsUpgrading(planName)
+  useEffect(() => {
+    const state = searchParams.get("paypal")
+    const subscriptionId =
+      searchParams.get("subscription_id") ||
+      (typeof window !== "undefined" ? window.localStorage.getItem("xsaas_pending_subscription_id") : "")
+
+    if (state === "cancel") {
+      setStatusMessage(t.billing.cancelled)
+      return
+    }
+
+    if (state !== "success" || !subscriptionId) {
+      return
+    }
+
+    let isMounted = true
+
+    async function syncSubscription() {
+      setStatusMessage(t.billing.success)
+      const response = await fetch("/api/billing/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscriptionId }),
+      })
+      const data = await response.json()
+
+      if (!isMounted) {
+        return
+      }
+
+      if (!response.ok) {
+        setStatusMessage(data.error || t.billing.syncError)
+        return
+      }
+
+      await loadBilling()
+      window.localStorage.removeItem("xsaas_pending_subscription_id")
+      setStatusMessage(`${t.billing.success} ${data.paypalStatus || ""}`.trim())
+    }
+
+    void syncSubscription()
+
+    return () => {
+      isMounted = false
+    }
+  }, [searchParams, t.billing.cancelled, t.billing.success, t.billing.syncError])
+
+  const handleUpgrade = async (planId: PlanKey, providerPlanId?: string) => {
+    setIsUpgrading(planId)
     setStatusMessage("")
+
+    if (!providerPlanId) {
+      setStatusMessage(t.billing.checkoutNotReady)
+      setIsUpgrading(null)
+      return
+    }
 
     try {
       const response = await fetch("/api/billing/checkout-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: planName.toLowerCase() }),
+        body: JSON.stringify({ plan: planId }),
       })
       const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to create checkout flow")
+        throw new Error(data.error || t.billing.checkoutError)
       }
 
       if (data.url) {
+        window.localStorage.setItem("xsaas_pending_subscription_id", data.providerSubscriptionId || "")
+        setStatusMessage(t.billing.redirecting)
         window.location.href = data.url
         return
       }
 
-      setStatusMessage(
-        data.nextStep || "PayPal checkout is not wired yet. The backend is ready for the next integration step."
-      )
+      setStatusMessage(t.billing.checkoutNotReady)
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Failed to create checkout flow")
+      setStatusMessage(error instanceof Error ? error.message : t.billing.checkoutError)
     } finally {
       setIsUpgrading(null)
     }
   }
 
-  const plans = useMemo(
-    () =>
-      (billing?.plans || []).map((plan) => ({
-        name: plan.name,
-        description:
-          plan.id === "starter"
-            ? "For creators just getting started"
-            : plan.id === "pro"
-              ? "For serious creators and solopreneurs"
-              : "For teams and agencies",
-        price: plan.price === 0 ? "Free" : `$${plan.price}`,
-        period: plan.price === 0 ? "" : "/month",
-        features: plan.features,
+  const plans = useMemo(() => {
+    const backendPlans = billing?.plans || []
+    return backendPlans.map((plan) => {
+      const ui = getPlanUi(language, plan.id)
+      return {
+        id: plan.id,
+        name: ui.name,
+        description: ui.description,
+        features: ui.features,
+        priceLabel: plan.price === 0 ? (language === "es" ? "Gratis" : "Free") : `$${plan.price}`,
+        period: plan.price === 0 ? "" : language === "es" ? "/mes" : "/month",
         current: Boolean(plan.current),
         recommended: plan.id === "pro",
-      })),
-    [billing]
-  )
+        providerPlanId: plan.providerPlanId,
+        cta: plan.id === "agency" ? t.billing.contactSales : t.billing.upgrade,
+      }
+    })
+  }, [billing?.plans, language, t.billing.contactSales, t.billing.upgrade])
 
   if (isLoadingPage) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           <Spinner />
-          Loading billing...
+          {t.billing.loading}
         </div>
       </div>
     )
   }
 
-  const currentPlanLabel = billing?.currentPlan
-    ? billing.currentPlan.charAt(0).toUpperCase() + billing.currentPlan.slice(1)
-    : "Starter"
+  const currentPlan = ((billing?.currentPlan || "starter") as PlanKey)
+  const currentPlanLabel = getPlanUi(language, currentPlan).name
   const alertsUsed = billing?.usage?.opportunityAlerts?.used ?? 0
   const alertsLimit = billing?.usage?.opportunityAlerts?.limit
   const accountUsed = billing?.usage?.connectedAccounts?.used ?? 0
@@ -142,35 +196,43 @@ export default function BillingPage() {
 
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <CardTitle>Current Plan</CardTitle>
-              <CardDescription>{`You're currently on the ${currentPlanLabel} plan`}</CardDescription>
+              <CardTitle>{t.billing.currentPlan}</CardTitle>
+              <CardDescription>
+                {t.billing.currentPlanDescription} {currentPlanLabel}
+              </CardDescription>
             </div>
-            <Badge variant="secondary" className="text-sm">
-              {currentPlanLabel}
-            </Badge>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="secondary" className="text-sm">
+                {currentPlanLabel}
+              </Badge>
+              <Badge variant={billing?.paypal?.webhookConfigured ? "default" : "secondary"}>
+                {t.billing.webhookState}:{" "}
+                {billing?.paypal?.webhookConfigured ? t.billing.webhookReady : t.billing.webhookMissing}
+              </Badge>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-3xl font-bold">{plans.find((plan) => plan.current)?.price || "Free"}</p>
-              <p className="text-sm text-muted-foreground">Membership billing</p>
+              <p className="text-3xl font-bold">{plans.find((plan) => plan.current)?.priceLabel || "Free"}</p>
+              <p className="text-sm text-muted-foreground">{t.billing.membershipBilling}</p>
             </div>
             <div className="flex gap-3">
               <Button variant="outline" asChild>
-                <a href="#plans">View all plans</a>
+                <a href="#plans">{t.billing.viewAllPlans}</a>
               </Button>
             </div>
           </div>
         </CardContent>
         <CardFooter className="border-t pt-6">
-          <div className="w-full space-y-2">
+          <div className="w-full space-y-3">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Opportunity alerts used today</span>
+              <span className="text-muted-foreground">{t.billing.alertsUsedToday}</span>
               <span className="font-medium">
-                {alertsLimit ? `${alertsUsed} / ${alertsLimit}` : `${alertsUsed} / unlimited`}
+                {alertsLimit === null ? `${alertsUsed}` : `${alertsUsed} / ${alertsLimit}`}
               </span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -179,7 +241,7 @@ export default function BillingPage() {
                 style={{ width: `${alertsLimit ? Math.min(100, Math.round((alertsUsed / alertsLimit) * 100)) : 100}%` }}
               />
             </div>
-            <p className="text-xs text-muted-foreground">Resets daily at midnight UTC</p>
+            <p className="text-xs text-muted-foreground">{t.billing.resetNote}</p>
           </div>
         </CardFooter>
       </Card>
@@ -191,37 +253,38 @@ export default function BillingPage() {
               <Zap className="size-6" />
             </div>
             <div>
-              <h3 className="font-semibold">Unlock unlimited opportunities</h3>
-              <p className="text-sm text-muted-foreground">
-                Upgrade to Pro and remove the daily ceiling on opportunity discovery.
-              </p>
+              <h3 className="font-semibold">{t.billing.unlockTitle}</h3>
+              <p className="text-sm text-muted-foreground">{t.billing.unlockDescription}</p>
             </div>
           </div>
-          <Button onClick={() => handleUpgrade("Pro")} disabled={isUpgrading === "Pro"}>
-            {isUpgrading === "Pro" ? <Spinner className="mr-2" /> : null}
-            Upgrade to Pro
+          <Button
+            onClick={() => handleUpgrade("pro", plans.find((plan) => plan.id === "pro")?.providerPlanId)}
+            disabled={isUpgrading === "pro"}
+          >
+            {isUpgrading === "pro" ? <Spinner className="mr-2" /> : null}
+            {t.billing.upgradeToPro}
           </Button>
         </CardContent>
       </Card>
 
       <div id="plans">
-        <h2 className="mb-6 text-xl font-semibold">All Plans</h2>
+        <h2 className="mb-6 text-xl font-semibold">{t.billing.allPlans}</h2>
         <div className="grid gap-6 lg:grid-cols-3">
           {plans.map((plan) => (
-            <Card key={plan.name} className={plan.recommended ? "border-primary" : ""}>
-              {plan.recommended && (
+            <Card key={plan.id} className={plan.recommended ? "border-primary" : ""}>
+              {plan.recommended ? (
                 <div className="flex justify-center">
-                  <Badge className="-mt-3">Most popular</Badge>
+                  <Badge className="-mt-3">{t.billing.mostPopular}</Badge>
                 </div>
-              )}
+              ) : null}
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
                   {plan.name}
-                  {plan.current && <Badge variant="secondary">Current</Badge>}
+                  {plan.current ? <Badge variant="secondary">{t.billing.current}</Badge> : null}
                 </CardTitle>
                 <CardDescription>{plan.description}</CardDescription>
                 <div className="mt-4">
-                  <span className="text-3xl font-bold">{plan.price}</span>
+                  <span className="text-3xl font-bold">{plan.priceLabel}</span>
                   <span className="text-muted-foreground">{plan.period}</span>
                 </div>
               </CardHeader>
@@ -238,17 +301,17 @@ export default function BillingPage() {
               <CardFooter>
                 {plan.current ? (
                   <Button variant="outline" className="w-full" disabled>
-                    Current plan
+                    {t.billing.currentPlanButton}
                   </Button>
                 ) : (
                   <Button
                     className="w-full"
                     variant={plan.recommended ? "default" : "outline"}
-                    onClick={() => handleUpgrade(plan.name)}
-                    disabled={isUpgrading === plan.name}
+                    onClick={() => handleUpgrade(plan.id, plan.providerPlanId)}
+                    disabled={isUpgrading === plan.id}
                   >
-                    {isUpgrading === plan.name ? <Spinner className="mr-2" /> : null}
-                    {plan.name === "Agency" ? "Contact sales" : "Upgrade"}
+                    {isUpgrading === plan.id ? <Spinner className="mr-2" /> : null}
+                    {plan.cta}
                   </Button>
                 )}
               </CardFooter>
@@ -259,8 +322,8 @@ export default function BillingPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Payment Method</CardTitle>
-          <CardDescription>Manage your billing setup and upgrade path</CardDescription>
+          <CardTitle>{t.billing.paymentMethod}</CardTitle>
+          <CardDescription>{t.billing.paymentMethodDescription}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-between rounded-lg border p-4">
@@ -269,12 +332,12 @@ export default function BillingPage() {
                 <CreditCard className="size-5" />
               </div>
               <div>
-                <p className="font-medium">PayPal subscriptions</p>
-                <p className="text-sm text-muted-foreground">Billing is wired for PayPal plan upgrades</p>
+                <p className="font-medium">{t.billing.paymentProvider}</p>
+                <p className="text-sm text-muted-foreground">{t.billing.paymentProviderDescription}</p>
               </div>
             </div>
             <Badge variant="outline">
-              {accountLimit ? `${accountUsed}/${accountLimit} accounts` : `${accountUsed} accounts`}
+              {accountLimit === null ? `${accountUsed}` : `${accountUsed}/${accountLimit}`}
             </Badge>
           </div>
         </CardContent>
@@ -282,38 +345,9 @@ export default function BillingPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Billing History</CardTitle>
-          <CardDescription>View and download your past invoices</CardDescription>
+          <CardTitle>{t.billing.noInvoicesTitle}</CardTitle>
+          <CardDescription>{t.billing.noInvoicesDescription}</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {invoices.map((invoice, index) => (
-              <div key={invoice.id}>
-                <div className="flex items-center justify-between py-2">
-                  <div className="flex items-center gap-4">
-                    <div>
-                      <p className="font-medium">{invoice.id}</p>
-                      <p className="text-sm text-muted-foreground">{invoice.date}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="font-medium">{invoice.amount}</p>
-                      <Badge variant="secondary" className="text-xs">
-                        {invoice.status}
-                      </Badge>
-                    </div>
-                    <Button variant="ghost" size="icon">
-                      <Download className="size-4" />
-                      <span className="sr-only">Download invoice</span>
-                    </Button>
-                  </div>
-                </div>
-                {index < invoices.length - 1 && <Separator />}
-              </div>
-            ))}
-          </div>
-        </CardContent>
       </Card>
     </div>
   )

@@ -4,20 +4,18 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import {
-  SidebarProvider,
-  Sidebar,
-  SidebarHeader,
-  SidebarContent,
-  SidebarFooter,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarGroupContent,
-  SidebarInset,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
+  Building2,
+  ChevronDown,
+  CreditCard,
+  FileText,
+  Home,
+  LogOut,
+  Plus,
+  Settings,
+  Zap,
+} from "lucide-react"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,32 +24,26 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Button } from "@/components/ui/button"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { LanguageToggle } from "@/components/language-toggle"
 import { Separator } from "@/components/ui/separator"
-import { Spinner } from "@/components/ui/spinner"
 import {
-  Home,
-  Zap,
-  FileText,
-  Settings,
-  CreditCard,
-  LogOut,
-  ChevronDown,
-  Building2,
-  Plus,
-} from "lucide-react"
-
-const navigation = [
-  { name: "Dashboard", href: "/dashboard", icon: Home },
-  { name: "Opportunities", href: "/dashboard/opportunities", icon: Zap },
-  { name: "Drafts", href: "/dashboard/drafts", icon: FileText },
-]
-
-const settingsNavigation = [
-  { name: "Workspace", href: "/dashboard/settings", icon: Settings },
-  { name: "Billing", href: "/dashboard/billing", icon: CreditCard },
-]
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar"
+import { Spinner } from "@/components/ui/spinner"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { useLanguage } from "@/lib/language-context"
 
 type SessionPayload = {
   user?: {
@@ -72,8 +64,26 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname()
   const router = useRouter()
+  const { t } = useLanguage()
   const [session, setSession] = useState<SessionPayload | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+
+  const navigation = useMemo(
+    () => [
+      { name: t.nav.dashboard, href: "/dashboard", icon: Home },
+      { name: t.nav.opportunities, href: "/dashboard/opportunities", icon: Zap },
+      { name: t.nav.drafts, href: "/dashboard/drafts", icon: FileText },
+    ],
+    [t]
+  )
+
+  const settingsNavigation = useMemo(
+    () => [
+      { name: t.nav.workspace, href: "/dashboard/settings", icon: Settings },
+      { name: t.nav.billing, href: "/dashboard/billing", icon: CreditCard },
+    ],
+    [t]
+  )
 
   useEffect(() => {
     let isMounted = true
@@ -112,7 +122,7 @@ export default function DashboardLayout({
   }
 
   const workspaces = session?.workspaces || []
-  const currentWorkspace = workspaces[0]?.name || "Workspace"
+  const currentWorkspace = workspaces[0]?.name || t.nav.workspace
   const userName = session?.user?.fullName || session?.user?.email || "Member"
   const userEmail = session?.user?.email || ""
   const avatarInitials = useMemo(() => {
@@ -125,12 +135,17 @@ export default function DashboardLayout({
       .join("")
   }, [session])
 
+  const pageTitle =
+    navigation.find((item) => pathname === item.href)?.name ||
+    settingsNavigation.find((item) => pathname === item.href)?.name ||
+    t.dashboard.pageTitles.dashboard
+
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           <Spinner />
-          Loading workspace...
+          {t.dashboard.loadingWorkspace}
         </div>
       </div>
     )
@@ -161,7 +176,7 @@ export default function DashboardLayout({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-56">
-                  <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t.dashboard.workspaces}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {workspaces.map((workspace) => (
                     <DropdownMenuItem key={workspace.id}>
@@ -172,18 +187,18 @@ export default function DashboardLayout({
                   <DropdownMenuSeparator />
                   <DropdownMenuItem>
                     <Plus className="mr-2 size-4" />
-                    Create workspace
+                    {t.dashboard.createWorkspace}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
           </SidebarGroup>
           <SidebarGroup>
-            <SidebarGroupLabel>Menu</SidebarGroupLabel>
+            <SidebarGroupLabel>{t.nav.menuGroup}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {navigation.map((item) => (
-                  <SidebarMenuItem key={item.name}>
+                  <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton asChild isActive={pathname === item.href}>
                       <Link href={item.href}>
                         <item.icon className="size-4" />
@@ -196,11 +211,11 @@ export default function DashboardLayout({
             </SidebarGroupContent>
           </SidebarGroup>
           <SidebarGroup>
-            <SidebarGroupLabel>Settings</SidebarGroupLabel>
+            <SidebarGroupLabel>{t.nav.settingsGroup}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {settingsNavigation.map((item) => (
-                  <SidebarMenuItem key={item.name}>
+                  <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton asChild isActive={pathname === item.href}>
                       <Link href={item.href}>
                         <item.icon className="size-4" />
@@ -228,24 +243,24 @@ export default function DashboardLayout({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56">
-              <DropdownMenuLabel>My Account</DropdownMenuLabel>
+              <DropdownMenuLabel>{t.dashboard.myAccount}</DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
                 <Link href="/dashboard/settings">
                   <Settings className="mr-2 size-4" />
-                  Settings
+                  {t.nav.workspace}
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
                 <Link href="/dashboard/billing">
                   <CreditCard className="mr-2 size-4" />
-                  Billing
+                  {t.nav.billing}
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout}>
                 <LogOut className="mr-2 size-4" />
-                Log out
+                {t.nav.logout}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -256,11 +271,11 @@ export default function DashboardLayout({
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-6" />
           <div className="flex flex-1 items-center justify-between">
-            <h1 className="text-lg font-semibold">
-              {navigation.find((item) => pathname === item.href)?.name ||
-                settingsNavigation.find((item) => pathname === item.href)?.name ||
-                "Dashboard"}
-            </h1>
+            <h1 className="text-lg font-semibold">{pageTitle}</h1>
+            <div className="flex items-center gap-2">
+              <ThemeToggle variant="outline" />
+              <LanguageToggle variant="outline" />
+            </div>
           </div>
         </header>
         <main className="flex-1 p-6">{children}</main>

@@ -26,6 +26,7 @@ Phase 1:
 - plan management
 - PayPal subscription wiring
 - draft-first workflow
+- Groq-powered recurring draft automation
 
 Phase 2:
 
@@ -62,6 +63,9 @@ npm run dev
 The API starts on `http://localhost:4000`.
 The frontend starts on `http://localhost:3000`.
 
+Use a dedicated MongoDB database name for Xsaas, even if you reuse the same Atlas cluster credentials.
+Do not point this app at another project's database.
+
 ## Useful scripts
 
 ```bash
@@ -77,17 +81,35 @@ npm run check
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
+- `GET /api/workspace`
+- `PATCH /api/workspace`
 - `GET /api/billing/config`
 - `POST /api/billing/checkout-link`
+- `POST /api/billing/sync`
 - `POST /api/billing/paypal/webhook`
+- `GET /api/drafts`
+- `POST /api/drafts`
+- `PATCH /api/drafts/:draftId`
+- `DELETE /api/drafts/:draftId`
+- `GET /api/automation/status`
+- `POST /api/automation/run`
 
 ## Repo structure
 
 - `src/server.js`: API bootstrap
 - `src/config.js`: env parsing
 - `src/lib/db.js`: Mongo connection
+- `src/lib/paypal.js`: PayPal catalog + checkout helpers
+- `src/lib/automation.js`: Groq draft automation + scheduler
 - `src/models`: core SaaS models
 - `src/routes`: auth, billing, health
 - `frontend`: Next.js marketing site + auth dashboard
 - `docs/FOUNDATION.md`: business/product base
 - `docs/FRONTEND_PROMPT.md`: copy-paste prompt for building the frontend elsewhere
+
+## Production notes
+
+- `APP_URL` must point to the public frontend URL so PayPal return/cancel links work correctly.
+- If `APP_URL` is a public URL, the backend will try to create the PayPal webhook automatically.
+- The API can bootstrap PayPal `Pro` and `Agency` plans automatically when credentials are present.
+- Starter stays free and does not need a PayPal subscription.

@@ -30,6 +30,56 @@ const workspaceSchema = new mongoose.Schema(
     xConnectionStatus: {
       type: String,
       default: "not_connected"
+    },
+    automation: {
+      enabled: {
+        type: Boolean,
+        default: false
+      },
+      language: {
+        type: String,
+        default: "es"
+      },
+      tone: {
+        type: String,
+        default: "sharp"
+      },
+      topics: {
+        type: [String],
+        default: []
+      },
+      brandVoice: {
+        type: String,
+        default: ""
+      },
+      audience: {
+        type: String,
+        default: ""
+      },
+      cadenceMinutes: {
+        type: Number,
+        default: 180
+      },
+      mode: {
+        type: String,
+        default: "draft_only"
+      },
+      lastRunAt: {
+        type: Date,
+        default: null
+      },
+      lastStatus: {
+        type: String,
+        default: "idle"
+      },
+      lastError: {
+        type: String,
+        default: ""
+      },
+      lastDraftId: {
+        type: String,
+        default: ""
+      }
     }
   },
   {

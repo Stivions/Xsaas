@@ -1,80 +1,46 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Spinner } from "@/components/ui/spinner"
-import { Zap, Quote, Reply, FileText, ArrowRight, TrendingUp } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import { ArrowRight, CreditCard, Layers, Sparkles, Users, Zap } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Spinner } from "@/components/ui/spinner"
+import { useLanguage } from "@/lib/language-context"
+import { getPlanUi, type PlanKey } from "@/lib/plan-ui"
 
-const stats = [
-  {
-    title: "Post Opportunities",
-    value: "12",
-    description: "New topics trending in your niche",
-    icon: Zap,
-    href: "/dashboard/opportunities?type=post",
-    trend: "+3 today",
-  },
-  {
-    title: "Quote Opportunities",
-    value: "8",
-    description: "High-engagement posts to quote",
-    icon: Quote,
-    href: "/dashboard/opportunities?type=quote",
-    trend: "+2 today",
-  },
-  {
-    title: "Reply Opportunities",
-    value: "24",
-    description: "Conversations to join",
-    icon: Reply,
-    href: "/dashboard/opportunities?type=reply",
-    trend: "+7 today",
-  },
-  {
-    title: "Drafts",
-    value: "5",
-    description: "Posts in your workspace",
-    icon: FileText,
-    href: "/dashboard/drafts",
-    trend: "2 scheduled",
-  },
-]
+type SessionPayload = {
+  user?: {
+    fullName?: string
+    email?: string
+  }
+}
 
-const recentOpportunities = [
-  {
-    type: "quote",
-    author: "@productdesigner",
-    content: "The best products are built by teams who understand that design is not just how it looks...",
-    engagement: "2.4k likes",
-    time: "2h ago",
-  },
-  {
-    type: "reply",
-    author: "@startupfounder",
-    content: "What tools are you using to track your audience growth in 2026?",
-    engagement: "156 replies",
-    time: "4h ago",
-  },
-  {
-    type: "post",
-    author: "Trending topic",
-    content: "#CreatorEconomy is trending with discussions about monetization strategies",
-    engagement: "15k posts",
-    time: "1h ago",
-  },
-]
+type BillingPayload = {
+  currentPlan?: string
+  usage?: {
+    opportunityAlerts?: { used: number; limit: number | null }
+    connectedAccounts?: { used: number; limit: number | null }
+  }
+}
+
+type WorkspacePayload = {
+  workspace?: {
+    automation?: {
+      enabled?: boolean
+      lastRunAt?: string | null
+      lastStatus?: string
+      lastError?: string
+    }
+  }
+}
 
 export default function DashboardPage() {
-  const [session, setSession] = useState<{ user?: { fullName?: string; email?: string } } | null>(null)
-  const [billing, setBilling] = useState<{
-    currentPlan?: string
-    usage?: {
-      opportunityAlerts?: { used: number; limit: number | null }
-    }
-  } | null>(null)
+  const { language, t } = useLanguage()
+  const [session, setSession] = useState<SessionPayload | null>(null)
+  const [billing, setBilling] = useState<BillingPayload | null>(null)
+  const [workspaceData, setWorkspaceData] = useState<WorkspacePayload | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
@@ -82,23 +48,22 @@ export default function DashboardPage() {
 
     async function loadData() {
       try {
-        const [sessionResponse, billingResponse] = await Promise.all([
+        const [sessionResponse, billingResponse, workspaceResponse] = await Promise.all([
           fetch("/api/auth/me", { cache: "no-store" }),
           fetch("/api/billing/config", { cache: "no-store" }),
+          fetch("/api/workspace", { cache: "no-store" }),
         ])
 
-        if (sessionResponse.ok) {
-          const sessionData = await sessionResponse.json()
-          if (isMounted) {
-            setSession(sessionData)
-          }
+        if (sessionResponse.ok && isMounted) {
+          setSession(await sessionResponse.json())
         }
 
-        if (billingResponse.ok) {
-          const billingData = await billingResponse.json()
-          if (isMounted) {
-            setBilling(billingData)
-          }
+        if (billingResponse.ok && isMounted) {
+          setBilling(await billingResponse.json())
+        }
+
+        if (workspaceResponse.ok && isMounted) {
+          setWorkspaceData(await workspaceResponse.json())
         }
       } finally {
         if (isMounted) {
@@ -114,48 +79,98 @@ export default function DashboardPage() {
     }
   }, [])
 
+  const currentPlan = ((billing?.currentPlan || "starter") as PlanKey)
+  const currentPlanUi = getPlanUi(language, currentPlan)
+  const alertUsed = billing?.usage?.opportunityAlerts?.used ?? 0
+  const alertLimit = billing?.usage?.opportunityAlerts?.limit
+  const remainingAlerts = alertLimit == null ? t.dashboard.unlimited : Math.max(alertLimit - alertUsed, 0)
+  const accountUsed = billing?.usage?.connectedAccounts?.used ?? 0
+  const accountLimit = billing?.usage?.connectedAccounts?.limit
+  const automation = workspaceData?.workspace?.automation
+  const automationValue = automation?.enabled
+    ? automation?.lastStatus === "running"
+      ? t.dashboard.automationRunning
+      : automation?.lastStatus === "error"
+        ? t.dashboard.automationError
+        : t.dashboard.automationReady
+    : t.dashboard.automationDisabled
+
+  const metrics = useMemo(
+    () => [
+      {
+        title: t.dashboard.planCard,
+        value: currentPlanUi.name,
+        description: t.dashboard.currentPlanTitle,
+        icon: CreditCard,
+        href: "/dashboard/billing",
+        actionLabel: t.dashboard.openBilling,
+      },
+      {
+        title: t.dashboard.alertsUsed,
+        value: alertLimit === null ? String(alertUsed) : `${alertUsed}/${alertLimit}`,
+        description: t.billing.alertsUsedToday,
+        icon: Zap,
+        href: "/dashboard/billing",
+        actionLabel: t.dashboard.openBilling,
+      },
+      {
+        title: t.dashboard.connectedAccounts,
+        value: accountLimit === null ? String(accountUsed) : `${accountUsed}/${accountLimit}`,
+        description: accountLimit === null ? t.dashboard.unlimited : t.dashboard.connectedAccounts,
+        icon: Users,
+        href: "/dashboard/settings",
+        actionLabel: t.dashboard.openSettings,
+      },
+      {
+        title: t.dashboard.automationStatus,
+        value: automationValue,
+        description: automation?.lastRunAt
+          ? `${t.dashboard.lastRun}: ${new Date(automation.lastRunAt).toLocaleString()}`
+          : t.dashboard.lastRun,
+        icon: Sparkles,
+        href: "/dashboard/settings",
+        actionLabel: t.dashboard.openSettings,
+      },
+    ],
+    [accountLimit, accountUsed, alertLimit, alertUsed, automation?.lastRunAt, automationValue, currentPlanUi.name, t]
+  )
+
   if (isLoading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           <Spinner />
-          Loading dashboard...
+          {t.common.loading}
         </div>
       </div>
     )
   }
 
   const displayName = session?.user?.fullName || session?.user?.email || "there"
-  const currentPlan = billing?.currentPlan || "starter"
-  const alertUsed = billing?.usage?.opportunityAlerts?.used ?? 0
-  const alertLimit = billing?.usage?.opportunityAlerts?.limit
-  const usageRatio = alertLimit ? Math.min(100, Math.round((alertUsed / alertLimit) * 100)) : 100
 
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-2xl font-bold tracking-tight">Welcome back, {displayName}</h2>
-        <p className="text-muted-foreground">{"Here's what's happening with your X growth today."}</p>
+        <h2 className="text-2xl font-bold tracking-tight">
+          {t.dashboard.pageTitles.dashboard}, {displayName}
+        </h2>
+        <p className="text-muted-foreground">{t.dashboard.overview}</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat) => (
-          <Card key={stat.title}>
+        {metrics.map((metric) => (
+          <Card key={metric.title}>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
-              <stat.icon className="size-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium text-muted-foreground">{metric.title}</CardTitle>
+              <metric.icon className="size-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">{stat.value}</div>
-              <p className="text-xs text-muted-foreground">{stat.description}</p>
-              <div className="mt-3 flex items-center justify-between">
-                <Badge variant="secondary" className="text-xs">
-                  <TrendingUp className="mr-1 size-3" />
-                  {stat.trend}
-                </Badge>
+              <div className="text-2xl font-bold">{metric.value}</div>
+              <p className="text-xs text-muted-foreground">{metric.description}</p>
+              <div className="mt-4">
                 <Button variant="ghost" size="sm" asChild>
-                  <Link href={stat.href}>
-                    View
+                  <Link href={metric.href}>
+                    {metric.actionLabel}
                     <ArrowRight className="ml-1 size-3" />
                   </Link>
                 </Button>
@@ -165,75 +180,56 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Current Plan: {currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1)}</CardTitle>
-              <CardDescription>
-                {alertLimit ? `You're using ${alertUsed} of ${alertLimit} daily opportunity alerts` : "Your plan has unlimited opportunity alerts"}
-              </CardDescription>
-            </div>
-            <Button asChild>
-              <Link href="/dashboard/billing">Upgrade to Pro</Link>
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="h-2 overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-foreground" style={{ width: `${usageRatio}%` }} />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Recent Opportunities</CardTitle>
-              <CardDescription>Top opportunities from the last 24 hours</CardDescription>
-            </div>
-            <Button variant="outline" asChild>
-              <Link href="/dashboard/opportunities">
-                View all
-                <ArrowRight className="ml-2 size-4" />
-              </Link>
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {recentOpportunities.map((opportunity, index) => (
-              <div
-                key={index}
-                className="flex items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
-              >
-                <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted">
-                  {opportunity.type === "quote" && <Quote className="size-4" />}
-                  {opportunity.type === "reply" && <Reply className="size-4" />}
-                  {opportunity.type === "post" && <Zap className="size-4" />}
-                </div>
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{opportunity.author}</span>
-                    <Badge variant="outline" className="text-xs capitalize">
-                      {opportunity.type}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground line-clamp-2">{opportunity.content}</p>
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span>{opportunity.engagement}</span>
-                    <span>{opportunity.time}</span>
-                  </div>
-                </div>
-                <Button variant="outline" size="sm">
-                  View
-                </Button>
+      <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>{t.dashboard.activityTitle}</CardTitle>
+                <CardDescription>{t.dashboard.activityDescription}</CardDescription>
               </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+              <Badge variant="secondary">{currentPlanUi.name}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="rounded-xl border border-dashed p-8 text-center">
+              <h3 className="text-lg font-semibold">{t.dashboard.emptyTitle}</h3>
+              <p className="mx-auto mt-2 max-w-2xl text-sm text-muted-foreground">{t.dashboard.emptyDescription}</p>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button asChild>
+                <Link href="/dashboard/settings">{t.dashboard.openSettings}</Link>
+              </Button>
+              <Button variant="outline" asChild>
+                <Link href="/dashboard/drafts">{t.dashboard.goToDrafts}</Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>{t.dashboard.alertsRemaining}</CardTitle>
+            <CardDescription>{alertLimit === null ? t.dashboard.unlimited : t.dashboard.alertsRemaining}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="text-4xl font-bold">{remainingAlerts}</div>
+            <div className="rounded-lg border p-4">
+              <p className="text-sm font-medium">{t.dashboard.automationStatus}</p>
+              <p className="mt-2 text-sm text-muted-foreground">{automationValue}</p>
+            </div>
+            <div className="rounded-lg border p-4">
+              <p className="text-sm font-medium">{t.dashboard.lastRun}</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {automation?.lastRunAt ? new Date(automation.lastRunAt).toLocaleString() : t.common.noData}
+              </p>
+            </div>
+            <Button variant="outline" asChild className="w-full">
+              <Link href="/dashboard/billing">{t.dashboard.openBilling}</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }
