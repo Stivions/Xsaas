@@ -21,9 +21,32 @@ function createPkcePair() {
   return { verifier, challenge, state }
 }
 
+function popupResponse(origin: string, status: string) {
+  const html = `<!doctype html>
+<html>
+  <body style="font-family: sans-serif; padding: 24px;">
+    <p>You can close this window.</p>
+    <script>
+      const payload = ${JSON.stringify({ type: "xsaas-x-connect", status })};
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage(payload, ${JSON.stringify(origin)});
+      }
+      window.close();
+    </script>
+  </body>
+</html>`
+
+  return new NextResponse(html, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+    },
+  })
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || url.origin
+  const popup = url.searchParams.get("popup") === "1"
   let clientId = process.env.X_CLIENT_ID || ""
   let redirectUri = process.env.X_REDIRECT_URI || `${appUrl.replace(/\/+$/, "")}/api/x/connect/callback`
   let scopes = (process.env.X_SCOPES || "tweet.read tweet.write users.read offline.access").trim()
@@ -47,6 +70,9 @@ export async function GET(request: Request) {
   }
 
   if (!clientId) {
+    if (popup) {
+      return popupResponse(url.origin, "missing_client")
+    }
     return NextResponse.redirect(new URL("/dashboard/settings?x=missing_client", url.origin))
   }
 
@@ -61,7 +87,7 @@ export async function GET(request: Request) {
   authorizeUrl.searchParams.set("code_challenge_method", "S256")
 
   const response = NextResponse.redirect(authorizeUrl)
-  response.cookies.set("xsaas_x_oauth", JSON.stringify({ verifier, state }), {
+  response.cookies.set("xsaas_x_oauth", JSON.stringify({ verifier, state, popup }), {
     httpOnly: true,
     sameSite: "lax",
     secure: url.protocol === "https:",

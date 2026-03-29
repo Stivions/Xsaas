@@ -113,6 +113,7 @@ export default function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
   const [isDisconnecting, setIsDisconnecting] = useState(false)
+  const [isConnectingX, setIsConnectingX] = useState(false)
   const [statusMessage, setStatusMessage] = useState("")
 
   async function loadData() {
@@ -172,6 +173,49 @@ export default function SettingsPage() {
     t.settings.xCallbackError,
     t.settings.xStateError,
     t.settings.xClientMissing,
+  ])
+
+  useEffect(() => {
+    function handleMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin) {
+        return
+      }
+
+      const payload = event.data
+      if (!payload || payload.type !== "xsaas-x-connect") {
+        return
+      }
+
+      setIsConnectingX(false)
+
+      if (payload.status === "connected") {
+        setStatusMessage(t.settings.xCallbackConnected)
+        void loadData()
+        return
+      }
+
+      if (payload.status === "missing_client") {
+        setStatusMessage(t.settings.xClientMissing)
+        return
+      }
+
+      if (payload.status === "invalid_state" || payload.status === "state_mismatch") {
+        setStatusMessage(t.settings.xStateError)
+        return
+      }
+
+      setStatusMessage(t.settings.xCallbackError)
+    }
+
+    window.addEventListener("message", handleMessage)
+    return () => {
+      window.removeEventListener("message", handleMessage)
+    }
+  }, [
+    t.settings.xCallbackConnected,
+    t.settings.xCallbackError,
+    t.settings.xClientMissing,
+    t.settings.xStateError,
   ])
 
   useEffect(() => {
@@ -263,6 +307,35 @@ export default function SettingsPage() {
     }
   }
 
+  function handleConnectX() {
+    setStatusMessage("")
+
+    const width = 560
+    const height = 760
+    const left = Math.max(window.screenX + (window.outerWidth - width) / 2, 0)
+    const top = Math.max(window.screenY + (window.outerHeight - height) / 2, 0)
+    const popup = window.open(
+      "/api/x/connect/start?popup=1",
+      "xsaas-x-connect",
+      `popup=yes,width=${width},height=${height},left=${left},top=${top}`
+    )
+
+    if (!popup) {
+      setStatusMessage(t.settings.xPopupBlocked)
+      return
+    }
+
+    setIsConnectingX(true)
+    popup.focus()
+
+    const watcher = window.setInterval(() => {
+      if (popup.closed) {
+        window.clearInterval(watcher)
+        setIsConnectingX(false)
+      }
+    }, 500)
+  }
+
   if (isLoading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -278,6 +351,7 @@ export default function SettingsPage() {
   const xStatusLabel = xStatus?.account ? t.settings.connected : t.settings.notConnected
   const accountUsage = billing?.usage?.connectedAccounts
   const currentPlanLabel = getPlanUi(language, ((billing?.currentPlan || "starter") as PlanKey)).name
+  const isPaidPlan = (billing?.currentPlan || "starter") !== "starter"
   const automationState = automationStatus?.automation?.lastStatus || currentWorkspace?.automation?.lastStatus || "idle"
   const automationStateLabel =
     automationState === "success"
@@ -380,10 +454,14 @@ export default function SettingsPage() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-medium">{t.settings.xNoAccount}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{xStatus?.redirectUri || t.common.noData}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{t.settings.xWindowHelp}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {isPaidPlan ? t.settings.xPremiumSession : t.settings.xStarterSession}
+                  </p>
                 </div>
-                <Button asChild disabled={!xStatus?.providerReady}>
-                  <a href="/api/x/connect/start">{t.settings.connectX}</a>
+                <Button type="button" onClick={handleConnectX} disabled={!xStatus?.providerReady || isConnectingX}>
+                  {isConnectingX ? <Spinner className="mr-2" /> : null}
+                  {t.settings.connectX}
                 </Button>
               </div>
             )}

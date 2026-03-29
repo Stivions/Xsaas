@@ -4,6 +4,28 @@ function getBackendUrl() {
   return process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"
 }
 
+function popupResponse(origin: string, status: string) {
+  const html = `<!doctype html>
+<html>
+  <body style="font-family: sans-serif; padding: 24px;">
+    <p>You can close this window.</p>
+    <script>
+      const payload = ${JSON.stringify({ type: "xsaas-x-connect", status })};
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage(payload, ${JSON.stringify(origin)});
+      }
+      window.close();
+    </script>
+  </body>
+</html>`
+
+  return new NextResponse(html, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+    },
+  })
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const code = url.searchParams.get("code") || ""
@@ -36,20 +58,26 @@ export async function GET(request: Request) {
 
   let verifier = ""
   let expectedState = ""
+  let popup = false
   try {
     const decoded = JSON.parse(decodeURIComponent(cookiePayload))
     verifier = decoded.verifier || ""
     expectedState = decoded.state || ""
+    popup = Boolean(decoded.popup)
   } catch {
-    redirectBase.searchParams.set("x", "invalid_state")
-    const response = NextResponse.redirect(redirectBase)
+    if (!popup) {
+      redirectBase.searchParams.set("x", "invalid_state")
+    }
+    const response = popup ? popupResponse(url.origin, "invalid_state") : NextResponse.redirect(redirectBase)
     response.cookies.delete("xsaas_x_oauth")
     return response
   }
 
   if (!verifier || state !== expectedState) {
-    redirectBase.searchParams.set("x", "state_mismatch")
-    const response = NextResponse.redirect(redirectBase)
+    if (!popup) {
+      redirectBase.searchParams.set("x", "state_mismatch")
+    }
+    const response = popup ? popupResponse(url.origin, "state_mismatch") : NextResponse.redirect(redirectBase)
     response.cookies.delete("xsaas_x_oauth")
     return response
   }
@@ -63,8 +91,12 @@ export async function GET(request: Request) {
     body: JSON.stringify({ code, state, verifier })
   })
 
-  redirectBase.searchParams.set("x", backendResponse.ok ? "connected" : "error")
-  const response = NextResponse.redirect(redirectBase)
+  const status = backendResponse.ok ? "connected" : "error"
+  if (!popup) {
+    redirectBase.searchParams.set("x", status)
+  }
+
+  const response = popup ? popupResponse(url.origin, status) : NextResponse.redirect(redirectBase)
   response.cookies.delete("xsaas_x_oauth")
   return response
 }

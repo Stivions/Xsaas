@@ -1,9 +1,15 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 
 import { User } from "../models/User.js";
 import { Workspace } from "../models/Workspace.js";
+import {
+  clearSessionCookie,
+  clearStarterConnectionsForUser,
+  issueWorkspaceSession,
+  readSessionTokenFromRequest,
+  verifySessionToken
+} from "../lib/session.js";
 
 function makeSlug(value) {
   return String(value || "")
@@ -13,44 +19,22 @@ function makeSlug(value) {
     .slice(0, 48);
 }
 
-function issueSession(user, config) {
-  return jwt.sign(
-    {
-      sub: String(user._id),
-      email: user.email,
-      role: user.role
-    },
-    config.jwtSecret,
-    { expiresIn: "7d" }
-  );
-}
-
-function sendSession(res, token, config) {
-  res.cookie(config.cookieName, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: config.nodeEnv === "production",
-    maxAge: 7 * 24 * 60 * 60 * 1000
-  });
-}
-
 export function createAuthRouter(config) {
   const router = Router();
   const requireAuth = (req, res, next) => {
-    const header = req.headers.authorization || "";
-    const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
-    const token = bearer || req.cookies?.[config.cookieName];
+    const token = readSessionTokenFromRequest(req, config);
 
     if (!token) {
       return res.status(401).json({ error: "Authentication required." });
     }
 
-    try {
-      req.auth = jwt.verify(token, config.jwtSecret);
+    const session = verifySessionToken(token, config);
+    if (session) {
+      req.auth = session;
       return next();
-    } catch {
-      return res.status(401).json({ error: "Invalid or expired session." });
     }
+
+    return res.status(401).json({ error: "Invalid or expired session." });
   };
 
   router.post("/register", async (req, res) => {
@@ -98,8 +82,7 @@ export function createAuthRouter(config) {
       plan: "starter"
     });
 
-    const token = issueSession(user, config);
-    sendSession(res, token, config);
+    const { token } = await issueWorkspaceSession(res, user, config);
 
     return res.status(201).json({
       user: {
@@ -133,8 +116,7 @@ export function createAuthRouter(config) {
     }
 
     const workspace = await Workspace.findOne({ ownerUserId: user._id }).sort({ createdAt: 1 });
-    const token = issueSession(user, config);
-    sendSession(res, token, config);
+    const { token } = await issueWorkspaceSession(res, user, config);
 
     return res.json({
       user: {
@@ -155,8 +137,15 @@ export function createAuthRouter(config) {
     });
   });
 
-  router.post("/logout", (_req, res) => {
-    res.clearCookie(config.cookieName);
+  router.post("/logout", async (req, res) => {
+    const token = readSessionTokenFromRequest(req, config);
+    const session = verifySessionToken(token, config);
+
+    if (session?.sub) {
+      await clearStarterConnectionsForUser(session.sub);
+    }
+
+    clearSessionCookie(res, config);
     return res.json({ ok: true });
   });
 

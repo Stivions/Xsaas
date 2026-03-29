@@ -5,6 +5,7 @@ import { Workspace } from "../models/Workspace.js";
 import { User } from "../models/User.js";
 import { ensurePayPalCatalog, createPayPalSubscription, getPayPalSubscription, verifyPayPalWebhook } from "../lib/paypal.js";
 import { PLAN_META } from "../lib/plans.js";
+import { clearStarterConnectionsForUser, issueWorkspaceSession } from "../lib/session.js";
 
 function normalizePayPalStatus(status = "") {
   const value = String(status || "").toUpperCase();
@@ -40,6 +41,12 @@ async function syncPayPalSubscription(config, subscriptionId) {
   if (workspace) {
     workspace.plan = status === "active" ? subscription.planKey : "starter";
     await workspace.save();
+
+    if (workspace.plan === "starter") {
+      await clearStarterConnectionsForUser(workspace.ownerUserId);
+      workspace.xConnectionStatus = "not_connected";
+      await workspace.save();
+    }
   }
 
   return {
@@ -169,6 +176,10 @@ export function createBillingRouter(config) {
 
     try {
       const synced = await syncPayPalSubscription(config, subscriptionId);
+      const user = req.auth?.sub ? await User.findById(req.auth.sub) : null;
+      if (user) {
+        await issueWorkspaceSession(res, user, config);
+      }
       return res.json({
         ok: true,
         subscription: {
