@@ -24,6 +24,27 @@ function getBasicAuth(config) {
   return Buffer.from(`${config.x.clientId}:${config.x.clientSecret}`).toString("base64");
 }
 
+export function normalizeXErrorMessage(error) {
+  const raw = String(error instanceof Error ? error.message : error || "").trim();
+  if (!raw) {
+    return "X rejected the request.";
+  }
+
+  if (/does not have any credits to fulfill this request/i.test(raw)) {
+    return "X rejected the publish request because the developer account has no API credits. The account is still connected.";
+  }
+
+  if (/Unauthorized|invalid token|expired token/i.test(raw)) {
+    return "X rejected the request because the session token is no longer valid. Reconnect the account and try again.";
+  }
+
+  if (/duplicate/i.test(raw)) {
+    return "X rejected the post because the content looks duplicated.";
+  }
+
+  return raw;
+}
+
 export function buildXAuthorizationUrl(config, { state, challenge }) {
   const params = new URLSearchParams({
     response_type: "code",
@@ -100,7 +121,7 @@ export async function xApiRequest(config, path, { method = "GET", accessToken, b
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload?.detail || payload?.title || payload?.error || "X API request failed.");
+    throw new Error(normalizeXErrorMessage(payload?.detail || payload?.title || payload?.error || "X API request failed."));
   }
 
   return payload;

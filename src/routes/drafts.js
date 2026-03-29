@@ -3,7 +3,7 @@ import { Router } from "express";
 import { Draft } from "../models/Draft.js";
 import { Workspace } from "../models/Workspace.js";
 import { XAccount } from "../models/XAccount.js";
-import { createXPost, getFreshAccessTokenForAccount } from "../lib/x.js";
+import { createXPost, getFreshAccessTokenForAccount, normalizeXErrorMessage } from "../lib/x.js";
 
 function serializeDraft(draft) {
   return {
@@ -68,11 +68,11 @@ async function publishDraftToX(config, workspace, draft) {
     return draft;
   } catch (error) {
     workspace.automation.lastStatus = "error";
-    workspace.automation.lastError = error instanceof Error ? error.message : "Failed to publish draft.";
+    workspace.automation.lastError = normalizeXErrorMessage(error instanceof Error ? error.message : "Failed to publish draft.");
     await workspace.save();
 
     if (xAccount) {
-      xAccount.lastError = error instanceof Error ? error.message : "Failed to publish draft.";
+      xAccount.lastError = normalizeXErrorMessage(error instanceof Error ? error.message : "Failed to publish draft.");
       await xAccount.save();
     }
 
@@ -179,7 +179,7 @@ export function createDraftsRouter(config) {
       return res.json({ draft: serializeDraft(publishedDraft) });
     } catch (error) {
       return res.status(400).json({
-        error: error instanceof Error ? error.message : "Failed to publish draft."
+        error: normalizeXErrorMessage(error instanceof Error ? error.message : "Failed to publish draft.")
       });
     }
   });

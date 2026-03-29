@@ -59,6 +59,7 @@ export function createAutomationRouter(config) {
 
     try {
       const draft = await runWorkspaceAutomation(config, workspace._id, { force: true });
+      const refreshedWorkspace = await Workspace.findById(workspace._id);
       return res.status(201).json({
         ok: true,
         draft: {
@@ -69,7 +70,16 @@ export function createAutomationRouter(config) {
           characterCount: draft.characterCount,
           externalPostUrl: draft.externalPostUrl || "",
           updatedAt: draft.updatedAt
-        }
+        },
+        automation: refreshedWorkspace
+          ? {
+              lastStatus: refreshedWorkspace.automation?.lastStatus || "idle",
+              lastError: refreshedWorkspace.automation?.lastError || ""
+            }
+          : {
+              lastStatus: workspace.automation?.lastStatus || "idle",
+              lastError: workspace.automation?.lastError || ""
+            }
       });
     } catch (error) {
       return res.status(400).json({

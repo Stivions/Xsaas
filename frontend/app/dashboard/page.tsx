@@ -90,6 +90,8 @@ export default function DashboardPage() {
   const automationValue = automation?.enabled
     ? automation?.lastStatus === "running"
       ? t.dashboard.automationRunning
+      : automation?.lastStatus === "warning"
+        ? t.dashboard.automationWarning
       : automation?.lastStatus === "error"
         ? t.dashboard.automationError
         : t.dashboard.automationReady
@@ -179,6 +181,13 @@ export default function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      {automation?.lastError ? (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
+          <span className="font-medium">{t.settings.automationLastIssue}: </span>
+          {automation.lastError}
+        </div>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
         <Card>

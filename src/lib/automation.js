@@ -3,7 +3,7 @@ import { Workspace } from "../models/Workspace.js";
 import { User } from "../models/User.js";
 import { XAccount } from "../models/XAccount.js";
 import { collectTrendCandidates } from "./trends.js";
-import { createXPost, getFreshAccessTokenForAccount } from "./x.js";
+import { createXPost, getFreshAccessTokenForAccount, normalizeXErrorMessage } from "./x.js";
 
 let schedulerHandle = null;
 let schedulerBusy = false;
@@ -116,18 +116,29 @@ async function publishToX(config, workspace, content) {
     throw new Error("Connect an X account before enabling auto-post.");
   }
 
-  const accessToken = await getFreshAccessTokenForAccount(config, xAccount);
-  const payload = await createXPost(config, accessToken, content);
-  const postId = payload?.data?.id || "";
+  try {
+    const accessToken = await getFreshAccessTokenForAccount(config, xAccount);
+    const payload = await createXPost(config, accessToken, content);
+    const postId = payload?.data?.id || "";
 
-  xAccount.lastUsedAt = new Date();
-  xAccount.lastError = "";
-  await xAccount.save();
+    xAccount.lastUsedAt = new Date();
+    xAccount.lastError = "";
+    await xAccount.save();
 
-  return {
-    id: postId,
-    url: buildPostUrl(xAccount.username, postId)
-  };
+    return {
+      id: postId,
+      url: buildPostUrl(xAccount.username, postId)
+    };
+  } catch (error) {
+    xAccount.lastError = normalizeXErrorMessage(error);
+    await xAccount.save();
+    throw error;
+  }
+}
+
+function isRecoverablePublishError(error) {
+  const message = normalizeXErrorMessage(error);
+  return /no API credits|account is still connected|duplicate|session token is no longer valid|connect an X account/i.test(message);
 }
 
 async function createDraftRecord({
@@ -196,20 +207,44 @@ export async function runWorkspaceAutomation(config, workspaceId, { force = fals
     const content = await generateDraftWithGroq(config, workspace, candidate);
 
     if (workspace.automation?.mode === "auto_post") {
-      const published = await publishToX(config, workspace, content);
-      return createDraftRecord({
-        workspace,
-        userId: user._id,
-        content,
-        source: "automation",
-        status: "published",
-        externalPostId: published.id,
-        externalPostUrl: published.url,
-        publishedAt: new Date(),
-        metadata: {
-          candidate
+      try {
+        const published = await publishToX(config, workspace, content);
+        return createDraftRecord({
+          workspace,
+          userId: user._id,
+          content,
+          source: "automation",
+          status: "published",
+          externalPostId: published.id,
+          externalPostUrl: published.url,
+          publishedAt: new Date(),
+          metadata: {
+            candidate
+          }
+        });
+      } catch (publishError) {
+        if (!isRecoverablePublishError(publishError)) {
+          throw publishError;
         }
-      });
+
+        const draft = await createDraftRecord({
+          workspace,
+          userId: user._id,
+          content,
+          source: "automation",
+          status: "draft",
+          metadata: {
+            candidate,
+            publishError: normalizeXErrorMessage(publishError)
+          }
+        });
+
+        workspace.automation.lastStatus = "warning";
+        workspace.automation.lastError = `${normalizeXErrorMessage(publishError)} Draft saved instead of auto-posting.`;
+        await workspace.save();
+
+        return draft;
+      }
     }
 
     return createDraftRecord({
@@ -225,7 +260,7 @@ export async function runWorkspaceAutomation(config, workspaceId, { force = fals
   } catch (error) {
     workspace.automation.lastRunAt = new Date();
     workspace.automation.lastStatus = "error";
-    workspace.automation.lastError = error instanceof Error ? error.message : "Automation failed.";
+    workspace.automation.lastError = normalizeXErrorMessage(error instanceof Error ? error.message : "Automation failed.");
     await workspace.save();
     throw error;
   }

@@ -285,7 +285,11 @@ export default function SettingsPage() {
         throw new Error(data.error || "Failed to run automation.")
       }
       await loadData()
-      setStatusMessage(t.settings.automationSaved)
+      if (data?.automation?.lastStatus === "warning" && data?.automation?.lastError) {
+        setStatusMessage(data.automation.lastError)
+      } else {
+        setStatusMessage(t.settings.automationSaved)
+      }
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : t.settings.automationErrorState)
     } finally {
@@ -367,6 +371,8 @@ export default function SettingsPage() {
       ? t.settings.automationSuccess
       : automationState === "running"
         ? t.settings.automationRunning
+        : automationState === "warning"
+          ? t.settings.automationWarningState
         : automationState === "error"
           ? t.settings.automationErrorState
           : t.settings.automationIdle
@@ -487,7 +493,17 @@ export default function SettingsPage() {
           <div className="flex flex-col gap-4 rounded-lg border p-4 md:flex-row md:items-center md:justify-between">
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-3">
-                <Badge variant={automationState === "success" ? "default" : automationState === "error" ? "destructive" : "secondary"}>
+                <Badge
+                  variant={
+                    automationState === "success"
+                      ? "default"
+                      : automationState === "error"
+                        ? "destructive"
+                        : automationState === "warning"
+                          ? "secondary"
+                          : "secondary"
+                  }
+                >
                   {automationStateLabel}
                 </Badge>
                 <Badge variant="outline">
@@ -509,6 +525,12 @@ export default function SettingsPage() {
                 >
                   {automationStatus.automation.lastPublishedPostUrl}
                 </a>
+              ) : null}
+              {automationStatus?.automation?.lastError ? (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
+                  <span className="font-medium">{t.settings.automationLastIssue}: </span>
+                  {automationStatus.automation.lastError}
+                </div>
               ) : null}
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">

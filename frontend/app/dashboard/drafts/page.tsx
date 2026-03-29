@@ -177,6 +177,9 @@ export default function DraftsPage() {
       }
       const data = await response.json()
       setDrafts((current) => [data.draft, ...current])
+      if (data?.automation?.lastStatus === "warning" && data?.automation?.lastError) {
+        setStatusMessage(data.automation.lastError)
+      }
     } finally {
       setIsGenerating(false)
     }
