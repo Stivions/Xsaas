@@ -33,6 +33,18 @@ const draftSchema = new mongoose.Schema(
       type: Date,
       default: null
     },
+    externalPostId: {
+      type: String,
+      default: ""
+    },
+    externalPostUrl: {
+      type: String,
+      default: ""
+    },
+    publishedAt: {
+      type: Date,
+      default: null
+    },
     metadata: {
       type: mongoose.Schema.Types.Mixed,
       default: {}

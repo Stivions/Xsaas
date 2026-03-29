@@ -64,6 +64,10 @@ const workspaceSchema = new mongoose.Schema(
         type: String,
         default: "draft_only"
       },
+      source: {
+        type: String,
+        default: "trends_news"
+      },
       lastRunAt: {
         type: Date,
         default: null
@@ -79,6 +83,18 @@ const workspaceSchema = new mongoose.Schema(
       lastDraftId: {
         type: String,
         default: ""
+      },
+      lastPublishedPostId: {
+        type: String,
+        default: ""
+      },
+      lastPublishedPostUrl: {
+        type: String,
+        default: ""
+      },
+      lastPublishedAt: {
+        type: Date,
+        default: null
       }
     }
   },

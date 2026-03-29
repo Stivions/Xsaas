@@ -37,10 +37,14 @@ export function createWorkspaceRouter() {
           audience: workspace.automation?.audience || "",
           cadenceMinutes: workspace.automation?.cadenceMinutes || 180,
           mode: workspace.automation?.mode || "draft_only",
+          source: workspace.automation?.source || "trends_news",
           lastRunAt: workspace.automation?.lastRunAt || null,
           lastStatus: workspace.automation?.lastStatus || "idle",
           lastError: workspace.automation?.lastError || "",
-          lastDraftId: workspace.automation?.lastDraftId || ""
+          lastDraftId: workspace.automation?.lastDraftId || "",
+          lastPublishedPostId: workspace.automation?.lastPublishedPostId || "",
+          lastPublishedPostUrl: workspace.automation?.lastPublishedPostUrl || "",
+          lastPublishedAt: workspace.automation?.lastPublishedAt || null
         }
       }
     });
@@ -68,7 +72,10 @@ export function createWorkspaceRouter() {
     workspace.automation.brandVoice = String(automation.brandVoice || "").trim().slice(0, 280);
     workspace.automation.audience = String(automation.audience || "").trim().slice(0, 160);
     workspace.automation.cadenceMinutes = Math.max(15, Math.min(1440, Number(automation.cadenceMinutes) || 180));
-    workspace.automation.mode = ["draft_only"].includes(String(automation.mode || "")) ? String(automation.mode) : "draft_only";
+    workspace.automation.mode = ["draft_only", "auto_post"].includes(String(automation.mode || ""))
+      ? String(automation.mode)
+      : "draft_only";
+    workspace.automation.source = ["trends_news"].includes(String(automation.source || "")) ? String(automation.source) : "trends_news";
 
     await workspace.save();
 

@@ -11,7 +11,9 @@ import { createAutomationRouter } from "./routes/automation.js";
 import { createBillingRouter, createPayPalWebhookHandler } from "./routes/billing.js";
 import { createDraftsRouter } from "./routes/drafts.js";
 import { createHealthRouter } from "./routes/health.js";
+import { createOpportunitiesRouter } from "./routes/opportunities.js";
 import { createWorkspaceRouter } from "./routes/workspace.js";
+import { createXRouter } from "./routes/x.js";
 
 const config = getConfig();
 const app = express();
@@ -32,6 +34,8 @@ app.use("/api/billing", authRequired(config), createBillingRouter(config));
 app.use("/api/workspace", authRequired(config), createWorkspaceRouter(config));
 app.use("/api/drafts", authRequired(config), createDraftsRouter(config));
 app.use("/api/automation", authRequired(config), createAutomationRouter(config));
+app.use("/api/opportunities", authRequired(config), createOpportunitiesRouter(config));
+app.use("/api/x", authRequired(config), createXRouter(config));
 
 app.get("/", (_req, res) => {
   res.json({

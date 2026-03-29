@@ -31,14 +31,19 @@ export function createAutomationRouter(config) {
         audience: workspace.automation?.audience || "",
         cadenceMinutes: workspace.automation?.cadenceMinutes || config.automation.defaultCadenceMinutes,
         mode: workspace.automation?.mode || "draft_only",
+        source: workspace.automation?.source || "trends_news",
         lastRunAt: workspace.automation?.lastRunAt || null,
         lastStatus: workspace.automation?.lastStatus || "idle",
         lastError: workspace.automation?.lastError || "",
+        lastPublishedPostId: workspace.automation?.lastPublishedPostId || "",
+        lastPublishedPostUrl: workspace.automation?.lastPublishedPostUrl || "",
+        lastPublishedAt: workspace.automation?.lastPublishedAt || null,
         lastDraft: lastDraft
           ? {
               id: String(lastDraft._id),
               content: lastDraft.content,
               status: lastDraft.status,
+              externalPostUrl: lastDraft.externalPostUrl || "",
               updatedAt: lastDraft.updatedAt
             }
           : null
@@ -62,6 +67,7 @@ export function createAutomationRouter(config) {
           status: draft.status,
           source: draft.source,
           characterCount: draft.characterCount,
+          externalPostUrl: draft.externalPostUrl || "",
           updatedAt: draft.updatedAt
         }
       });

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -31,11 +32,14 @@ type WorkspacePayload = {
       brandVoice: string
       audience: string
       cadenceMinutes: number
-      mode: "draft_only"
+      mode: "draft_only" | "auto_post"
+      source: "trends_news"
       lastRunAt?: string | null
       lastStatus?: string
       lastError?: string
       lastDraftId?: string
+      lastPublishedPostUrl?: string
+      lastPublishedAt?: string | null
     }
   }
 }
@@ -52,10 +56,25 @@ type AutomationStatusPayload = {
     lastRunAt?: string | null
     lastStatus?: string
     lastError?: string
+    lastPublishedPostUrl?: string
+    lastPublishedAt?: string | null
     lastDraft?: {
       content?: string
+      externalPostUrl?: string
     } | null
   }
+}
+
+type XStatusPayload = {
+  providerReady?: boolean
+  redirectUri?: string
+  scopes?: string[]
+  account?: {
+    username?: string
+    displayName?: string
+    scopes?: string[]
+    lastError?: string
+  } | null
 }
 
 type AutomationForm = {
@@ -66,7 +85,8 @@ type AutomationForm = {
   brandVoice: string
   audience: string
   cadenceMinutes: number
-  mode: "draft_only"
+  mode: "draft_only" | "auto_post"
+  source: "trends_news"
 }
 
 const defaultForm: AutomationForm = {
@@ -78,24 +98,29 @@ const defaultForm: AutomationForm = {
   audience: "",
   cadenceMinutes: 180,
   mode: "draft_only",
+  source: "trends_news",
 }
 
 export default function SettingsPage() {
+  const searchParams = useSearchParams()
   const { language, t } = useLanguage()
   const [workspaceData, setWorkspaceData] = useState<WorkspacePayload | null>(null)
   const [billing, setBilling] = useState<BillingPayload | null>(null)
   const [automationStatus, setAutomationStatus] = useState<AutomationStatusPayload | null>(null)
+  const [xStatus, setXStatus] = useState<XStatusPayload | null>(null)
   const [form, setForm] = useState<AutomationForm>(defaultForm)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
+  const [isDisconnecting, setIsDisconnecting] = useState(false)
   const [statusMessage, setStatusMessage] = useState("")
 
   async function loadData() {
-    const [workspaceResponse, billingResponse, automationResponse] = await Promise.all([
+    const [workspaceResponse, billingResponse, automationResponse, xStatusResponse] = await Promise.all([
       fetch("/api/workspace", { cache: "no-store" }),
       fetch("/api/billing/config", { cache: "no-store" }),
       fetch("/api/automation/status", { cache: "no-store" }),
+      fetch("/api/x/status", { cache: "no-store" }),
     ])
 
     if (workspaceResponse.ok) {
@@ -112,6 +137,7 @@ export default function SettingsPage() {
           audience: automation.audience || "",
           cadenceMinutes: automation.cadenceMinutes || 180,
           mode: automation.mode || "draft_only",
+          source: automation.source || "trends_news",
         })
       }
     }
@@ -123,7 +149,30 @@ export default function SettingsPage() {
     if (automationResponse.ok) {
       setAutomationStatus(await automationResponse.json())
     }
+
+    if (xStatusResponse.ok) {
+      setXStatus(await xStatusResponse.json())
+    }
   }
+
+  useEffect(() => {
+    const xState = searchParams.get("x")
+    if (xState === "connected") {
+      setStatusMessage(t.settings.xCallbackConnected)
+    } else if (xState === "error" || xState === "oauth_error") {
+      setStatusMessage(t.settings.xCallbackError)
+    } else if (xState === "state_mismatch" || xState === "invalid_state" || xState === "invalid_callback") {
+      setStatusMessage(t.settings.xStateError)
+    } else if (xState === "missing_client") {
+      setStatusMessage(t.settings.xClientMissing)
+    }
+  }, [
+    searchParams,
+    t.settings.xCallbackConnected,
+    t.settings.xCallbackError,
+    t.settings.xStateError,
+    t.settings.xClientMissing,
+  ])
 
   useEffect(() => {
     let isMounted = true
@@ -195,6 +244,25 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleDisconnectX() {
+    setIsDisconnecting(true)
+    setStatusMessage("")
+    try {
+      const response = await fetch("/api/x/disconnect", {
+        method: "POST",
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to disconnect X account.")
+      }
+      await loadData()
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : t.settings.xCallbackError)
+    } finally {
+      setIsDisconnecting(false)
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
@@ -207,7 +275,7 @@ export default function SettingsPage() {
   }
 
   const currentWorkspace = workspaceData?.workspace
-  const xStatus = currentWorkspace?.xConnectionStatus === "connected" ? t.settings.connected : t.settings.notConnected
+  const xStatusLabel = xStatus?.account ? t.settings.connected : t.settings.notConnected
   const accountUsage = billing?.usage?.connectedAccounts
   const currentPlanLabel = getPlanUi(language, ((billing?.currentPlan || "starter") as PlanKey)).name
   const automationState = automationStatus?.automation?.lastStatus || currentWorkspace?.automation?.lastStatus || "idle"
@@ -259,21 +327,66 @@ export default function SettingsPage() {
           <CardTitle>{t.settings.connectionTitle}</CardTitle>
           <CardDescription>{t.settings.connectionDescription}</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-6 md:grid-cols-2">
-          <div>
-            <p className="text-sm font-medium">{t.settings.connectionStatus}</p>
-            <div className="mt-2">
-              <Badge variant={xStatus === t.settings.connected ? "default" : "secondary"}>{xStatus}</Badge>
+        <CardContent className="space-y-6">
+          <div className="grid gap-6 md:grid-cols-2">
+            <div>
+              <p className="text-sm font-medium">{t.settings.connectionStatus}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Badge variant={xStatusLabel === t.settings.connected ? "default" : "secondary"}>{xStatusLabel}</Badge>
+                <Badge variant={xStatus?.providerReady ? "outline" : "secondary"}>
+                  {xStatus?.providerReady ? t.settings.xReady : t.settings.xMissing}
+                </Badge>
+              </div>
+            </div>
+            <div>
+              <p className="text-sm font-medium">{t.settings.accountsTitle}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{t.settings.accountsDescription}</p>
+              <p className="mt-2 text-sm font-medium">
+                {accountUsage?.limit === null
+                  ? `${accountUsage?.used ?? 0}`
+                  : `${accountUsage?.used ?? 0} / ${accountUsage?.limit ?? 0}`}
+              </p>
             </div>
           </div>
-          <div>
-            <p className="text-sm font-medium">{t.settings.accountsTitle}</p>
-            <p className="mt-1 text-sm text-muted-foreground">{t.settings.accountsDescription}</p>
-            <p className="mt-2 text-sm font-medium">
-              {accountUsage?.limit === null
-                ? `${accountUsage?.used ?? 0}`
-                : `${accountUsage?.used ?? 0} / ${accountUsage?.limit ?? 0}`}
-            </p>
+
+          <div className="rounded-lg border p-4">
+            {xStatus?.account ? (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium">{t.settings.xConnectedAs}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {xStatus.account.displayName || xStatus.account.username} @{xStatus.account.username}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium">{t.settings.xScopes}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(xStatus.account.scopes || []).map((scope) => (
+                      <Badge key={scope} variant="outline">
+                        {scope}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+                {xStatus.account.lastError ? (
+                  <p className="text-sm text-destructive">{xStatus.account.lastError}</p>
+                ) : null}
+                <Button variant="outline" onClick={handleDisconnectX} disabled={isDisconnecting}>
+                  {isDisconnecting ? <Spinner className="mr-2" /> : null}
+                  {t.settings.disconnectX}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium">{t.settings.xNoAccount}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{xStatus?.redirectUri || t.common.noData}</p>
+                </div>
+                <Button asChild disabled={!xStatus?.providerReady}>
+                  <a href="/api/x/connect/start">{t.settings.connectX}</a>
+                </Button>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -286,11 +399,13 @@ export default function SettingsPage() {
         <CardContent className="space-y-6">
           <div className="flex flex-col gap-4 rounded-lg border p-4 md:flex-row md:items-center md:justify-between">
             <div className="space-y-2">
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <Badge variant={automationState === "success" ? "default" : automationState === "error" ? "destructive" : "secondary"}>
                   {automationStateLabel}
                 </Badge>
-                <Badge variant="outline">{currentWorkspace?.automation?.mode === "draft_only" ? t.settings.automationDraftOnly : currentWorkspace?.automation?.mode}</Badge>
+                <Badge variant="outline">
+                  {currentWorkspace?.automation?.mode === "auto_post" ? t.settings.automationAutoPost : t.settings.automationDraftOnly}
+                </Badge>
               </div>
               <p className="text-sm text-muted-foreground">
                 {t.settings.automationLastRun}:{" "}
@@ -298,6 +413,16 @@ export default function SettingsPage() {
                   ? new Date(automationStatus.automation.lastRunAt).toLocaleString()
                   : t.common.noData}
               </p>
+              {automationStatus?.automation?.lastPublishedPostUrl ? (
+                <a
+                  href={automationStatus.automation.lastPublishedPostUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm text-primary underline-offset-4 hover:underline"
+                >
+                  {automationStatus.automation.lastPublishedPostUrl}
+                </a>
+              ) : null}
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <Button variant="outline" onClick={handleRunNow} disabled={isRunning}>
@@ -401,12 +526,31 @@ export default function SettingsPage() {
 
               <div className="space-y-2">
                 <Label>{t.settings.automationMode}</Label>
-                <Select value={form.mode} onValueChange={(value: "draft_only") => setForm((current) => ({ ...current, mode: value }))}>
+                <Select
+                  value={form.mode}
+                  onValueChange={(value: "draft_only" | "auto_post") => setForm((current) => ({ ...current, mode: value }))}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="draft_only">{t.settings.automationDraftOnly}</SelectItem>
+                    <SelectItem value="auto_post">{t.settings.automationAutoPost}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>{t.settings.automationSource}</Label>
+                <Select
+                  value={form.source}
+                  onValueChange={(value: "trends_news") => setForm((current) => ({ ...current, source: value }))}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="trends_news">{t.settings.automationTrendsNews}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -418,6 +562,16 @@ export default function SettingsPage() {
             <p className="mt-2 text-sm text-muted-foreground">
               {automationStatus?.automation?.lastDraft?.content || t.common.noData}
             </p>
+            {automationStatus?.automation?.lastDraft?.externalPostUrl ? (
+              <a
+                href={automationStatus.automation.lastDraft.externalPostUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 inline-block text-sm text-primary underline-offset-4 hover:underline"
+              >
+                {automationStatus.automation.lastDraft.externalPostUrl}
+              </a>
+            ) : null}
           </div>
         </CardContent>
       </Card>

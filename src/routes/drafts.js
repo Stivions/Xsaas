@@ -2,6 +2,8 @@ import { Router } from "express";
 
 import { Draft } from "../models/Draft.js";
 import { Workspace } from "../models/Workspace.js";
+import { XAccount } from "../models/XAccount.js";
+import { createXPost, getFreshAccessTokenForAccount } from "../lib/x.js";
 
 function serializeDraft(draft) {
   return {
@@ -11,6 +13,9 @@ function serializeDraft(draft) {
     source: draft.source,
     characterCount: draft.characterCount,
     scheduledFor: draft.scheduledFor,
+    externalPostId: draft.externalPostId || "",
+    externalPostUrl: draft.externalPostUrl || "",
+    publishedAt: draft.publishedAt || null,
     createdAt: draft.createdAt,
     updatedAt: draft.updatedAt
   };
@@ -20,7 +25,62 @@ async function getWorkspace(req) {
   return Workspace.findOne({ ownerUserId: req.auth.sub }).sort({ createdAt: 1 });
 }
 
-export function createDraftsRouter() {
+function buildPostUrl(username, postId) {
+  if (!username || !postId) {
+    return "";
+  }
+
+  return `https://x.com/${String(username).replace(/^@/, "")}/status/${postId}`;
+}
+
+async function publishDraftToX(config, workspace, draft) {
+  const xAccount = await XAccount.findOne({ workspaceId: workspace._id });
+  if (!xAccount) {
+    throw new Error("Connect an X account before publishing.");
+  }
+
+  try {
+    const accessToken = await getFreshAccessTokenForAccount(config, xAccount);
+    const payload = await createXPost(config, accessToken, draft.content);
+    const postId = payload?.data?.id || "";
+    const postUrl = buildPostUrl(xAccount.username, postId);
+    const publishedAt = new Date();
+
+    draft.status = "published";
+    draft.publishedAt = publishedAt;
+    draft.scheduledFor = null;
+    draft.externalPostId = postId;
+    draft.externalPostUrl = postUrl;
+    await draft.save();
+
+    workspace.xConnectionStatus = "connected";
+    workspace.automation.lastPublishedPostId = postId;
+    workspace.automation.lastPublishedPostUrl = postUrl;
+    workspace.automation.lastPublishedAt = publishedAt;
+    workspace.automation.lastStatus = "success";
+    workspace.automation.lastError = "";
+    await workspace.save();
+
+    xAccount.lastUsedAt = publishedAt;
+    xAccount.lastError = "";
+    await xAccount.save();
+
+    return draft;
+  } catch (error) {
+    workspace.automation.lastStatus = "error";
+    workspace.automation.lastError = error instanceof Error ? error.message : "Failed to publish draft.";
+    await workspace.save();
+
+    if (xAccount) {
+      xAccount.lastError = error instanceof Error ? error.message : "Failed to publish draft.";
+      await xAccount.save();
+    }
+
+    throw error;
+  }
+}
+
+export function createDraftsRouter(config) {
   const router = Router();
 
   router.get("/", async (req, res) => {
@@ -91,6 +151,37 @@ export function createDraftsRouter() {
 
     await draft.save();
     return res.json({ draft: serializeDraft(draft) });
+  });
+
+  router.post("/:draftId/publish", async (req, res) => {
+    const workspace = await getWorkspace(req);
+    if (!workspace) {
+      return res.status(404).json({ error: "Workspace not found." });
+    }
+
+    const draft = await Draft.findOne({ _id: req.params.draftId, workspaceId: workspace._id });
+    if (!draft) {
+      return res.status(404).json({ error: "Draft not found." });
+    }
+
+    if (!draft.content?.trim()) {
+      return res.status(400).json({ error: "Draft content is required before publishing." });
+    }
+
+    if (draft.externalPostId) {
+      draft.status = "published";
+      await draft.save();
+      return res.json({ draft: serializeDraft(draft) });
+    }
+
+    try {
+      const publishedDraft = await publishDraftToX(config, workspace, draft);
+      return res.json({ draft: serializeDraft(publishedDraft) });
+    } catch (error) {
+      return res.status(400).json({
+        error: error instanceof Error ? error.message : "Failed to publish draft."
+      });
+    }
   });
 
   router.delete("/:draftId", async (req, res) => {

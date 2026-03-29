@@ -90,9 +90,14 @@ npm run check
 - `GET /api/drafts`
 - `POST /api/drafts`
 - `PATCH /api/drafts/:draftId`
+- `POST /api/drafts/:draftId/publish`
 - `DELETE /api/drafts/:draftId`
 - `GET /api/automation/status`
 - `POST /api/automation/run`
+- `GET /api/opportunities`
+- `GET /api/x/status`
+- `POST /api/x/connect/callback`
+- `POST /api/x/disconnect`
 
 ## Repo structure
 
@@ -100,7 +105,9 @@ npm run check
 - `src/config.js`: env parsing
 - `src/lib/db.js`: Mongo connection
 - `src/lib/paypal.js`: PayPal catalog + checkout helpers
-- `src/lib/automation.js`: Groq draft automation + scheduler
+- `src/lib/automation.js`: Groq automation + scheduler
+- `src/lib/trends.js`: Google Trends and Google News signal collection
+- `src/lib/x.js`: X OAuth token exchange, refresh, and posting helpers
 - `src/models`: core SaaS models
 - `src/routes`: auth, billing, health
 - `frontend`: Next.js marketing site + auth dashboard
@@ -113,3 +120,5 @@ npm run check
 - If `APP_URL` is a public URL, the backend will try to create the PayPal webhook automatically.
 - The API can bootstrap PayPal `Pro` and `Agency` plans automatically when credentials are present.
 - Starter stays free and does not need a PayPal subscription.
+- To connect real X accounts, you must create an X developer app and register `X_REDIRECT_URI`.
+- `ENCRYPTION_SECRET` should be set in production so refresh/access tokens are encrypted with a stable secret.

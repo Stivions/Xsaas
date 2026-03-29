@@ -5,6 +5,7 @@ import {
   Calendar,
   Clock,
   Edit2,
+  ExternalLink,
   MoreHorizontal,
   Plus,
   Sparkles,
@@ -45,6 +46,8 @@ interface Draft {
   updatedAt: string
   scheduledFor?: string | null
   characterCount: number
+  externalPostUrl?: string
+  publishedAt?: string | null
 }
 
 export default function DraftsPage() {
@@ -57,6 +60,8 @@ export default function DraftsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [publishingDraftId, setPublishingDraftId] = useState("")
+  const [statusMessage, setStatusMessage] = useState("")
 
   async function loadDrafts() {
     setIsLoading(true)
@@ -79,6 +84,7 @@ export default function DraftsPage() {
   const handleCreateDraft = async () => {
     if (!newDraftContent.trim()) return
     setIsSaving(true)
+    setStatusMessage("")
     try {
       const response = await fetch("/api/drafts", {
         method: "POST",
@@ -86,6 +92,8 @@ export default function DraftsPage() {
         body: JSON.stringify({ content: newDraftContent.trim(), status: "draft", source: "manual" }),
       })
       if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        setStatusMessage(data.error || "Failed to create draft.")
         return
       }
       const data = await response.json()
@@ -98,11 +106,14 @@ export default function DraftsPage() {
   }
 
   const handleDeleteDraft = async (id: string) => {
+    setStatusMessage("")
     const previous = drafts
     setDrafts((current) => current.filter((draft) => draft.id !== id))
     const response = await fetch(`/api/drafts/${id}`, { method: "DELETE" })
     if (!response.ok) {
       setDrafts(previous)
+      const data = await response.json().catch(() => ({}))
+      setStatusMessage(data.error || "Failed to delete draft.")
     }
   }
 
@@ -114,6 +125,7 @@ export default function DraftsPage() {
   const handleSaveEdit = async () => {
     if (!editingDraft || !editContent.trim()) return
     setIsSaving(true)
+    setStatusMessage("")
     try {
       const response = await fetch(`/api/drafts/${editingDraft.id}`, {
         method: "PATCH",
@@ -121,6 +133,8 @@ export default function DraftsPage() {
         body: JSON.stringify({ content: editContent.trim() }),
       })
       if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        setStatusMessage(data.error || "Failed to update draft.")
         return
       }
       const data = await response.json()
@@ -133,6 +147,7 @@ export default function DraftsPage() {
   }
 
   const markDraftStatus = async (id: string, status: DraftStatus) => {
+    setStatusMessage("")
     const scheduledFor = status === "scheduled" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null
     const response = await fetch(`/api/drafts/${id}`, {
       method: "PATCH",
@@ -140,6 +155,8 @@ export default function DraftsPage() {
       body: JSON.stringify({ status, scheduledFor }),
     })
     if (!response.ok) {
+      const data = await response.json().catch(() => ({}))
+      setStatusMessage(data.error || "Failed to update draft.")
       return
     }
     const data = await response.json()
@@ -148,17 +165,42 @@ export default function DraftsPage() {
 
   const handleGenerateDraft = async () => {
     setIsGenerating(true)
+    setStatusMessage("")
     try {
       const response = await fetch("/api/automation/run", {
         method: "POST",
       })
       if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        setStatusMessage(data.error || "Failed to generate draft.")
         return
       }
       const data = await response.json()
       setDrafts((current) => [data.draft, ...current])
     } finally {
       setIsGenerating(false)
+    }
+  }
+
+  const handlePublishDraft = async (draftId: string) => {
+    setPublishingDraftId(draftId)
+    setStatusMessage("")
+    try {
+      const response = await fetch(`/api/drafts/${draftId}/publish`, {
+        method: "POST",
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setStatusMessage(data.error || "Failed to publish draft.")
+        return
+      }
+
+      setDrafts((current) => current.map((draft) => (draft.id === draftId ? data.draft : draft)))
+      if (data?.draft?.externalPostUrl) {
+        setStatusMessage(data.draft.externalPostUrl)
+      }
+    } finally {
+      setPublishingDraftId("")
     }
   }
 
@@ -178,6 +220,12 @@ export default function DraftsPage() {
 
   return (
     <div className="space-y-6">
+      {statusMessage ? (
+        <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+          {statusMessage}
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">{t.drafts.title}</h2>
@@ -309,11 +357,11 @@ export default function DraftsPage() {
                       <Edit2 className="mr-2 size-4" />
                       {t.drafts.actions.edit}
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => markDraftStatus(draft.id, "scheduled")}>
-                      <Calendar className="mr-2 size-4" />
-                      {t.drafts.actions.schedule}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => markDraftStatus(draft.id, "published")}>
+                  <DropdownMenuItem onClick={() => markDraftStatus(draft.id, "scheduled")}>
+                    <Calendar className="mr-2 size-4" />
+                    {t.drafts.actions.schedule}
+                  </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handlePublishDraft(draft.id)} disabled={publishingDraftId === draft.id}>
                       <Sparkles className="mr-2 size-4" />
                       {t.drafts.actions.postNow}
                     </DropdownMenuItem>
@@ -330,13 +378,26 @@ export default function DraftsPage() {
               </CardHeader>
               <CardContent className="flex-1">
                 <p className="line-clamp-5 text-sm leading-relaxed">{draft.content}</p>
+                {draft.externalPostUrl ? (
+                  <a
+                    href={draft.externalPostUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-4 inline-flex items-center gap-2 text-sm text-primary underline-offset-4 hover:underline"
+                  >
+                    <ExternalLink className="size-4" />
+                    {draft.externalPostUrl}
+                  </a>
+                ) : null}
               </CardContent>
               <div className="flex items-center justify-between border-t px-6 py-3 text-xs text-muted-foreground">
                 <span>
                   {draft.characterCount} {t.drafts.characters}
                 </span>
                 <span>
-                  {t.drafts.updated} {new Date(draft.updatedAt).toLocaleDateString()}
+                  {draft.publishedAt
+                    ? `${t.drafts.status.published} ${new Date(draft.publishedAt).toLocaleDateString()}`
+                    : `${t.drafts.updated} ${new Date(draft.updatedAt).toLocaleDateString()}`}
                 </span>
               </div>
             </Card>

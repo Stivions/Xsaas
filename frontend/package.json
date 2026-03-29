@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start",
-    "check": "next build"
+    "check": "next build --webpack"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

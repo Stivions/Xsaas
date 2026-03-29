@@ -1,6 +1,9 @@
 import { Draft } from "../models/Draft.js";
 import { Workspace } from "../models/Workspace.js";
 import { User } from "../models/User.js";
+import { XAccount } from "../models/XAccount.js";
+import { collectTrendCandidates } from "./trends.js";
+import { createXPost, getFreshAccessTokenForAccount } from "./x.js";
 
 let schedulerHandle = null;
 let schedulerBusy = false;
@@ -12,7 +15,7 @@ function normalizeTopics(value = []) {
     .slice(0, 12);
 }
 
-function buildPrompt(workspace) {
+function buildPrompt(workspace, candidate) {
   const automation = workspace.automation || {};
   const topics = normalizeTopics(automation.topics);
   const language = automation.language || "es";
@@ -20,20 +23,41 @@ function buildPrompt(workspace) {
   const audience = automation.audience || "creators and founders on X";
   const brandVoice = automation.brandVoice || "direct, useful, credible";
 
+  const contextLines = candidate
+    ? [
+        `Topic: ${candidate.topic}.`,
+        `Headline: ${candidate.articleTitle}.`,
+        `Context: ${candidate.articleSnippet}.`,
+        candidate.articlePublishedAt ? `Published at: ${candidate.articlePublishedAt}.` : ""
+      ].filter(Boolean)
+    : [];
+
   return [
-    `Write one high-quality X post draft in ${language === "es" ? "Spanish" : "English"}.`,
-    "Keep it natural, human, and sharp. Avoid hashtags, emojis, and generic AI phrasing.",
-    "The output must be only the post text.",
-    "Keep it under 260 characters unless a slightly longer post is clearly stronger.",
+    `Write one high-quality X post in ${language === "es" ? "Spanish" : "English"}.`,
+    "Keep it natural, human, sharp, and native to X.",
+    "Do not use hashtags, emojis, markdown, or generic AI wording.",
+    "The output must be only the final post text.",
+    "Aim for 220-260 characters max unless a shorter post is stronger.",
     `Tone: ${tone}.`,
     `Audience: ${audience}.`,
     `Brand voice: ${brandVoice}.`,
-    topics.length ? `Topics to prioritize: ${topics.join(", ")}.` : "Topics to prioritize: X growth, content systems, audience building.",
-    "Make it specific enough to feel useful, not vague inspiration."
+    topics.length ? `Priority topics: ${topics.join(", ")}.` : "Priority topics: X growth, audience building, online business.",
+    ...contextLines,
+    "The post should feel timely, informed, and opinionated without sounding robotic."
   ].join("\n");
 }
 
-export async function generateDraftWithGroq(config, workspace) {
+function cleanGeneratedPost(text) {
+  return String(text || "")
+    .replace(/```(?:json)?/gi, "")
+    .replace(/```/g, "")
+    .replace(/^["']|["']$/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 280);
+}
+
+async function generateDraftWithGroq(config, workspace, candidate) {
   if (!config.groq.apiKey) {
     throw new Error("Groq API key is missing.");
   }
@@ -51,11 +75,11 @@ export async function generateDraftWithGroq(config, workspace) {
       messages: [
         {
           role: "system",
-          content: "You write publish-ready X posts for a premium SaaS product."
+          content: "You write timely, publish-ready posts for X."
         },
         {
           role: "user",
-          content: buildPrompt(workspace)
+          content: buildPrompt(workspace, candidate)
         }
       ]
     })
@@ -66,32 +90,80 @@ export async function generateDraftWithGroq(config, workspace) {
     throw new Error(payload?.error?.message || payload?.message || "Groq generation failed.");
   }
 
-  const content = payload?.choices?.[0]?.message?.content?.trim() || "";
+  const content = cleanGeneratedPost(payload?.choices?.[0]?.message?.content || "");
   if (!content) {
     throw new Error("Groq returned an empty draft.");
   }
 
-  return content.replace(/^["']|["']$/g, "").trim();
+  return content;
 }
 
-export async function createDraftRecord({ workspace, userId, content, source = "automation" }) {
+async function pickCandidate(config, workspace) {
+  const candidates = await collectTrendCandidates(config, normalizeTopics(workspace.automation?.topics || []));
+  return candidates[0] || null;
+}
+
+function buildPostUrl(username, postId) {
+  if (!username || !postId) {
+    return "";
+  }
+  return `https://x.com/${String(username).replace(/^@/, "")}/status/${postId}`;
+}
+
+async function publishToX(config, workspace, content) {
+  const xAccount = await XAccount.findOne({ workspaceId: workspace._id });
+  if (!xAccount) {
+    throw new Error("Connect an X account before enabling auto-post.");
+  }
+
+  const accessToken = await getFreshAccessTokenForAccount(config, xAccount);
+  const payload = await createXPost(config, accessToken, content);
+  const postId = payload?.data?.id || "";
+
+  xAccount.lastUsedAt = new Date();
+  xAccount.lastError = "";
+  await xAccount.save();
+
+  return {
+    id: postId,
+    url: buildPostUrl(xAccount.username, postId)
+  };
+}
+
+async function createDraftRecord({
+  workspace,
+  userId,
+  content,
+  source = "automation",
+  status = "draft",
+  metadata = {},
+  externalPostId = "",
+  externalPostUrl = "",
+  publishedAt = null
+}) {
   const trimmed = String(content || "").trim();
   const draft = await Draft.create({
     userId,
     workspaceId: workspace._id,
     content: trimmed,
-    status: "draft",
+    status,
     source,
     characterCount: trimmed.length,
-    metadata: {
-      generatedFromTopics: workspace.automation?.topics || []
-    }
+    externalPostId,
+    externalPostUrl,
+    publishedAt,
+    metadata
   });
 
   workspace.automation.lastDraftId = String(draft._id);
   workspace.automation.lastRunAt = new Date();
   workspace.automation.lastStatus = "success";
   workspace.automation.lastError = "";
+  if (externalPostId) {
+    workspace.automation.lastPublishedPostId = externalPostId;
+    workspace.automation.lastPublishedPostUrl = externalPostUrl;
+    workspace.automation.lastPublishedAt = publishedAt || new Date();
+  }
   await workspace.save();
 
   return draft;
@@ -120,12 +192,35 @@ export async function runWorkspaceAutomation(config, workspaceId, { force = fals
   }
 
   try {
-    const content = await generateDraftWithGroq(config, workspace);
+    const candidate = workspace.automation?.source === "trends_news" ? await pickCandidate(config, workspace) : null;
+    const content = await generateDraftWithGroq(config, workspace, candidate);
+
+    if (workspace.automation?.mode === "auto_post") {
+      const published = await publishToX(config, workspace, content);
+      return createDraftRecord({
+        workspace,
+        userId: user._id,
+        content,
+        source: "automation",
+        status: "published",
+        externalPostId: published.id,
+        externalPostUrl: published.url,
+        publishedAt: new Date(),
+        metadata: {
+          candidate
+        }
+      });
+    }
+
     return createDraftRecord({
       workspace,
       userId: user._id,
       content,
-      source: "automation"
+      source: "automation",
+      status: "draft",
+      metadata: {
+        candidate
+      }
     });
   } catch (error) {
     workspace.automation.lastRunAt = new Date();
@@ -151,7 +246,11 @@ async function processAutomationTick(config) {
       const dueAt = lastRunAt + cadenceMinutes * 60 * 1000;
 
       if (Date.now() >= dueAt) {
-        await runWorkspaceAutomation(config, workspace._id);
+        try {
+          await runWorkspaceAutomation(config, workspace._id);
+        } catch (error) {
+          console.error(`[xsaas] automation failed for workspace ${workspace._id}`, error);
+        }
       }
     }
   } catch (error) {
