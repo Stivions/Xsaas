@@ -1,38 +1,69 @@
-import crypto from "node:crypto"
-
 import { NextResponse } from "next/server"
 
 function getBackendUrl() {
   return process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"
 }
 
-function toBase64Url(buffer: Buffer) {
-  return buffer
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "")
-}
+function popupHtml(origin: string, payload: { status: string; message: string; ticketId?: string }) {
+  const pollScript = payload.ticketId
+    ? `
+      const ticketId = ${JSON.stringify(payload.ticketId)};
+      const messageNode = document.getElementById("message");
+      async function poll() {
+        try {
+          const response = await fetch("/api/x/connect/progress?ticket=" + encodeURIComponent(ticketId), { cache: "no-store" });
+          const data = await response.json();
+          if (data?.message && messageNode) {
+            messageNode.textContent = data.message;
+          }
+          if (data?.status && data.status !== "pending") {
+            const finalPayload = {
+              type: "xsaas-x-connect",
+              status: data.status,
+              message: data.message || ""
+            };
+            if (window.opener && !window.opener.closed) {
+              window.opener.postMessage(finalPayload, ${JSON.stringify(origin)});
+              try { window.opener.focus(); } catch {}
+            }
+            window.close();
+            return;
+          }
+        } catch (error) {
+          if (messageNode) {
+            messageNode.textContent = "We could not read the X session status. Keep the X login window open and try again if this does not finish.";
+          }
+        }
+        window.setTimeout(poll, 1500);
+      }
+      window.setTimeout(poll, 1200);
+    `
+    : `
+      const finalPayload = {
+        type: "xsaas-x-connect",
+        status: ${JSON.stringify(payload.status)},
+        message: ${JSON.stringify(payload.message)}
+      };
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage(finalPayload, ${JSON.stringify(origin)});
+        try { window.opener.focus(); } catch {}
+      }
+      window.setTimeout(() => window.close(), 1200);
+    `
 
-function createPkcePair() {
-  const verifier = toBase64Url(crypto.randomBytes(48))
-  const challenge = toBase64Url(crypto.createHash("sha256").update(verifier).digest())
-  const state = crypto.randomUUID()
-  return { verifier, challenge, state }
-}
-
-function popupResponse(origin: string, status: string) {
   const html = `<!doctype html>
 <html>
-  <body style="font-family: sans-serif; padding: 24px;">
-    <p>You can close this window.</p>
-    <script>
-      const payload = ${JSON.stringify({ type: "xsaas-x-connect", status })};
-      if (window.opener && !window.opener.closed) {
-        window.opener.postMessage(payload, ${JSON.stringify(origin)});
-      }
-      window.close();
-    </script>
+  <head>
+    <meta charset="utf-8" />
+    <title>X connection</title>
+  </head>
+  <body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#09090b;color:#fafafa;font-family:ui-sans-serif,system-ui,sans-serif;">
+    <div style="width:min(92vw,460px);border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:28px;background:rgba(24,24,27,.96);box-shadow:0 20px 80px rgba(0,0,0,.35);">
+      <h1 style="margin:0 0 12px;font-size:22px;">Connect your X session</h1>
+      <p id="message" style="margin:0 0 16px;line-height:1.6;color:rgba(250,250,250,.78);">${payload.message}</p>
+      <p style="margin:0;color:rgba(250,250,250,.58);font-size:13px;">Keep the X browser window open until we save the session. This helper window will close on its own.</p>
+    </div>
+    <script>${pollScript}</script>
   </body>
 </html>`
 
@@ -45,54 +76,29 @@ function popupResponse(origin: string, status: string) {
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || url.origin
-  const popup = url.searchParams.get("popup") === "1"
-  let clientId = process.env.X_CLIENT_ID || ""
-  let redirectUri = process.env.X_REDIRECT_URI || `${appUrl.replace(/\/+$/, "")}/api/x/connect/callback`
-  let scopes = (process.env.X_SCOPES || "tweet.read tweet.write users.read offline.access").trim()
-
-  try {
-    const backendResponse = await fetch(`${getBackendUrl()}/api/x/status`, {
-      headers: {
-        cookie: request.headers.get("cookie") || ""
-      },
-      cache: "no-store"
-    })
-
-    if (backendResponse.ok) {
-      const payload = await backendResponse.json()
-      clientId = String(payload.clientId || clientId || "")
-      redirectUri = String(payload.redirectUri || redirectUri)
-      scopes = Array.isArray(payload.scopes) ? payload.scopes.join(" ") : scopes
-    }
-  } catch {
-    // fall back to local env configuration
-  }
-
-  if (!clientId) {
-    if (popup) {
-      return popupResponse(url.origin, "missing_client")
-    }
-    return NextResponse.redirect(new URL("/dashboard/settings?x=missing_client", url.origin))
-  }
-
-  const { verifier, challenge, state } = createPkcePair()
-  const authorizeUrl = new URL(process.env.X_AUTH_URL || "https://x.com/i/oauth2/authorize")
-  authorizeUrl.searchParams.set("response_type", "code")
-  authorizeUrl.searchParams.set("client_id", clientId)
-  authorizeUrl.searchParams.set("redirect_uri", redirectUri)
-  authorizeUrl.searchParams.set("scope", scopes)
-  authorizeUrl.searchParams.set("state", state)
-  authorizeUrl.searchParams.set("code_challenge", challenge)
-  authorizeUrl.searchParams.set("code_challenge_method", "S256")
-
-  const response = NextResponse.redirect(authorizeUrl)
-  response.cookies.set("xsaas_x_oauth", JSON.stringify({ verifier, state, popup }), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: url.protocol === "https:",
-    maxAge: 60 * 10,
-    path: "/"
+  const response = await fetch(`${getBackendUrl()}/api/x/connect/start`, {
+    method: "POST",
+    headers: {
+      cookie: request.headers.get("cookie") || ""
+    },
+    cache: "no-store"
   })
-  return response
+
+  const payload = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    return popupHtml(url.origin, {
+      status: "error",
+      message: String(payload.error || "Could not start the X browser session.")
+    })
+  }
+
+  return popupHtml(url.origin, {
+    status: String(payload.status || "pending"),
+    message: String(
+      payload.message ||
+        "We opened an X browser window. Finish logging in there and we will save the session automatically."
+    ),
+    ticketId: String(payload.ticketId || "")
+  })
 }

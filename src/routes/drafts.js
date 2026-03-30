@@ -1,9 +1,10 @@
 import { Router } from "express";
 
+import { encryptSecret } from "../lib/crypto.js";
 import { Draft } from "../models/Draft.js";
 import { Workspace } from "../models/Workspace.js";
 import { XAccount } from "../models/XAccount.js";
-import { createXPost, getFreshAccessTokenForAccount, normalizeXErrorMessage } from "../lib/x.js";
+import { buildXPostUrl, normalizeXErrorMessage, publishTextPost } from "../lib/x-browser.js";
 
 function serializeDraft(draft) {
   return {
@@ -26,24 +27,23 @@ async function getWorkspace(req) {
 }
 
 function buildPostUrl(username, postId) {
-  if (!username || !postId) {
-    return "";
-  }
-
-  return `https://x.com/${String(username).replace(/^@/, "")}/status/${postId}`;
+  return buildXPostUrl(username, postId);
 }
 
 async function publishDraftToX(config, workspace, draft) {
-  const xAccount = await XAccount.findOne({ workspaceId: workspace._id });
+  const xAccount = await XAccount.findOne({
+    workspaceId: workspace._id,
+    connectionMode: "browser_session",
+    storageStateEnc: { $ne: "" }
+  });
   if (!xAccount) {
-    throw new Error("Connect an X account before publishing.");
+    throw new Error("Connect an X browser session before publishing.");
   }
 
   try {
-    const accessToken = await getFreshAccessTokenForAccount(config, xAccount);
-    const payload = await createXPost(config, accessToken, draft.content);
-    const postId = payload?.data?.id || "";
-    const postUrl = buildPostUrl(xAccount.username, postId);
+    const payload = await publishTextPost(config, xAccount, { text: draft.content });
+    const postId = payload?.postId || "";
+    const postUrl = payload?.postUrl || buildPostUrl(xAccount.username, postId);
     const publishedAt = new Date();
 
     draft.status = "published";
@@ -63,6 +63,9 @@ async function publishDraftToX(config, workspace, draft) {
 
     xAccount.lastUsedAt = publishedAt;
     xAccount.lastError = "";
+    if (payload?.storageStateB64) {
+      xAccount.storageStateEnc = encryptSecret(payload.storageStateB64, config.encryptionSecret);
+    }
     await xAccount.save();
 
     return draft;
@@ -74,6 +77,10 @@ async function publishDraftToX(config, workspace, draft) {
     if (xAccount) {
       xAccount.lastError = normalizeXErrorMessage(error instanceof Error ? error.message : "Failed to publish draft.");
       await xAccount.save();
+      if (/session expired|connect the account again/i.test(xAccount.lastError)) {
+        workspace.xConnectionStatus = "error";
+        await workspace.save();
+      }
     }
 
     throw error;

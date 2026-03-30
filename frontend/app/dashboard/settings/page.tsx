@@ -67,13 +67,19 @@ type AutomationStatusPayload = {
 
 type XStatusPayload = {
   providerReady?: boolean
-  redirectUri?: string
-  scopes?: string[]
+  connectionMode?: string
+  requiresReconnect?: boolean
+  connectJob?: {
+    ticketId?: string
+    status?: string
+    message?: string
+  } | null
   account?: {
     username?: string
     displayName?: string
     scopes?: string[]
     lastError?: string
+    connectionMode?: string
   } | null
 }
 
@@ -163,17 +169,11 @@ export default function SettingsPage() {
       setStatusMessage(t.settings.xCallbackConnected)
     } else if (xState === "error" || xState === "oauth_error") {
       setStatusMessage(t.settings.xCallbackError)
-    } else if (xState === "state_mismatch" || xState === "invalid_state" || xState === "invalid_callback") {
-      setStatusMessage(t.settings.xStateError)
-    } else if (xState === "missing_client") {
-      setStatusMessage(t.settings.xClientMissing)
     }
   }, [
     searchParams,
     t.settings.xCallbackConnected,
     t.settings.xCallbackError,
-    t.settings.xStateError,
-    t.settings.xClientMissing,
   ])
 
   useEffect(() => {
@@ -194,22 +194,13 @@ export default function SettingsPage() {
       setIsConnectingX(false)
 
       if (payload.status === "connected") {
-        setStatusMessage(t.settings.xCallbackConnected)
+        setStatusMessage(String(payload.message || t.settings.xCallbackConnected))
         void loadData()
         return
       }
 
-      if (payload.status === "missing_client") {
-        setStatusMessage(t.settings.xClientMissing)
-        return
-      }
-
-      if (payload.status === "invalid_state" || payload.status === "state_mismatch") {
-        setStatusMessage(t.settings.xStateError)
-        return
-      }
-
-      setStatusMessage(t.settings.xCallbackError)
+      setStatusMessage(String(payload.message || t.settings.xCallbackError))
+      void loadData()
     }
 
     window.addEventListener("message", handleMessage)
@@ -242,6 +233,20 @@ export default function SettingsPage() {
       isMounted = false
     }
   }, [])
+
+  useEffect(() => {
+    if (!xStatus?.connectJob?.ticketId || xStatus.connectJob.status !== "pending") {
+      return
+    }
+
+    const interval = window.setInterval(() => {
+      void loadData()
+    }, 2000)
+
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [xStatus?.connectJob?.status, xStatus?.connectJob?.ticketId])
 
   async function handleSave() {
     setIsSaving(true)
@@ -425,6 +430,9 @@ export default function SettingsPage() {
                 <Badge variant={xStatus?.providerReady ? "outline" : "secondary"}>
                   {xStatus?.providerReady ? t.settings.xReady : t.settings.xMissing}
                 </Badge>
+                {xStatus?.connectJob?.status === "pending" ? (
+                  <Badge variant="outline">{t.settings.automationRunning}</Badge>
+                ) : null}
               </div>
             </div>
             <div>
@@ -470,11 +478,21 @@ export default function SettingsPage() {
                 <div>
                   <p className="text-sm font-medium">{t.settings.xNoAccount}</p>
                   <p className="mt-1 text-sm text-muted-foreground">{t.settings.xWindowHelp}</p>
+                  {xStatus?.connectJob?.message ? (
+                    <p className="mt-2 text-sm text-muted-foreground">{xStatus.connectJob.message}</p>
+                  ) : null}
+                  {xStatus?.requiresReconnect ? (
+                    <p className="mt-2 text-sm text-amber-500">{t.settings.xStateError}</p>
+                  ) : null}
                   <p className="mt-2 text-sm text-muted-foreground">
                     {isPaidPlan ? t.settings.xPremiumSession : t.settings.xStarterSession}
                   </p>
                 </div>
-                <Button type="button" onClick={handleConnectX} disabled={!xStatus?.providerReady || isConnectingX}>
+                <Button
+                  type="button"
+                  onClick={handleConnectX}
+                  disabled={!xStatus?.providerReady || isConnectingX || xStatus?.connectJob?.status === "pending"}
+                >
                   {isConnectingX ? <Spinner className="mr-2" /> : null}
                   {t.settings.connectX}
                 </Button>

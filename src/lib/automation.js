@@ -2,8 +2,9 @@ import { Draft } from "../models/Draft.js";
 import { Workspace } from "../models/Workspace.js";
 import { User } from "../models/User.js";
 import { XAccount } from "../models/XAccount.js";
+import { encryptSecret } from "./crypto.js";
 import { collectTrendCandidates } from "./trends.js";
-import { createXPost, getFreshAccessTokenForAccount, normalizeXErrorMessage } from "./x.js";
+import { normalizeXErrorMessage, publishTextPost } from "./x-browser.js";
 
 let schedulerHandle = null;
 let schedulerBusy = false;
@@ -111,34 +112,44 @@ function buildPostUrl(username, postId) {
 }
 
 async function publishToX(config, workspace, content) {
-  const xAccount = await XAccount.findOne({ workspaceId: workspace._id });
+  const xAccount = await XAccount.findOne({
+    workspaceId: workspace._id,
+    connectionMode: "browser_session",
+    storageStateEnc: { $ne: "" }
+  });
   if (!xAccount) {
-    throw new Error("Connect an X account before enabling auto-post.");
+    throw new Error("Connect an X browser session before enabling auto-post.");
   }
 
   try {
-    const accessToken = await getFreshAccessTokenForAccount(config, xAccount);
-    const payload = await createXPost(config, accessToken, content);
-    const postId = payload?.data?.id || "";
+    const payload = await publishTextPost(config, xAccount, { text: content });
+    const postId = payload?.postId || "";
 
     xAccount.lastUsedAt = new Date();
     xAccount.lastError = "";
+    if (payload?.storageStateB64) {
+      xAccount.storageStateEnc = encryptSecret(payload.storageStateB64, config.encryptionSecret);
+    }
     await xAccount.save();
 
     return {
       id: postId,
-      url: buildPostUrl(xAccount.username, postId)
+      url: payload?.postUrl || buildPostUrl(xAccount.username, postId)
     };
   } catch (error) {
     xAccount.lastError = normalizeXErrorMessage(error);
     await xAccount.save();
+    if (/session expired|connect the account again/i.test(xAccount.lastError)) {
+      workspace.xConnectionStatus = "error";
+      await workspace.save();
+    }
     throw error;
   }
 }
 
 function isRecoverablePublishError(error) {
   const message = normalizeXErrorMessage(error);
-  return /no API credits|account is still connected|duplicate|session token is no longer valid|connect an X account/i.test(message);
+  return /duplicate|session expired|connect the account again|connect an x browser session|connect an x account/i.test(message);
 }
 
 async function createDraftRecord({

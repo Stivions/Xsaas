@@ -17,6 +17,10 @@ const xAccountSchema = new mongoose.Schema(
       type: String,
       default: "x"
     },
+    connectionMode: {
+      type: String,
+      default: "browser_session"
+    },
     accountId: {
       type: String,
       required: true,
@@ -37,13 +41,17 @@ const xAccountSchema = new mongoose.Schema(
       type: String,
       default: "bearer"
     },
+    storageStateEnc: {
+      type: String,
+      default: ""
+    },
     scopes: {
       type: [String],
       default: []
     },
     accessTokenEnc: {
       type: String,
-      required: true
+      default: ""
     },
     refreshTokenEnc: {
       type: String,

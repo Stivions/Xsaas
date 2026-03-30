@@ -38,6 +38,9 @@ export function getConfig() {
       newsCeid: read(process.env.GOOGLE_NEWS_CEID, "US:en")
     },
     x: {
+      baseUrl: read(process.env.X_BASE_URL, "https://x.com"),
+      headless: readBoolean(process.env.X_HEADLESS, true),
+      connectTimeoutMs: Number.parseInt(read(process.env.X_CONNECT_TIMEOUT_MS, "900000"), 10) || 900000,
       clientId: read(process.env.X_CLIENT_ID),
       clientSecret: read(process.env.X_CLIENT_SECRET),
       redirectUri: read(process.env.X_REDIRECT_URI, `${read(process.env.APP_URL, "http://localhost:3000").replace(/\/+$/, "")}/api/x/connect/callback`),
