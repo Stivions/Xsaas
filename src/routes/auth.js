@@ -149,18 +149,29 @@ export function createAuthRouter(config) {
     return res.json({ ok: true });
   });
 
-  router.get("/me", requireAuth, async (req, res) => {
-    if (!req.auth?.sub) {
+  router.get("/me", async (req, res) => {
+    const optional = String(req.query?.optional || "").trim() === "1";
+    const token = readSessionTokenFromRequest(req, config);
+    const session = verifySessionToken(token, config);
+
+    if (!session?.sub) {
+      if (optional) {
+        return res.json({ authenticated: false });
+      }
       return res.status(401).json({ error: "Authentication required." });
     }
 
-    const user = await User.findById(req.auth.sub);
+    const user = await User.findById(session.sub);
     if (!user) {
+      if (optional) {
+        return res.json({ authenticated: false });
+      }
       return res.status(404).json({ error: "User not found." });
     }
 
     const workspaces = await Workspace.find({ ownerUserId: user._id }).sort({ createdAt: 1 });
     return res.json({
+      authenticated: true,
       user: {
         id: String(user._id),
         email: user.email,

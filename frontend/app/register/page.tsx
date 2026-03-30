@@ -1,8 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -10,9 +9,39 @@ import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 
 export default function RegisterPage() {
-  const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
+  const [isCheckingSession, setIsCheckingSession] = useState(true)
   const [error, setError] = useState("")
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function checkSession() {
+      try {
+        const response = await fetch("/api/auth/me?optional=1", { cache: "no-store" })
+        if (!response.ok) {
+          return
+        }
+        const data = await response.json()
+        if (data?.authenticated) {
+          window.location.replace("/dashboard")
+          return
+        }
+      } catch {
+        // keep the register form visible
+      } finally {
+        if (isMounted) {
+          setIsCheckingSession(false)
+        }
+      }
+    }
+
+    void checkSession()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -36,13 +65,23 @@ export default function RegisterPage() {
         throw new Error(data.error || "Registration failed")
       }
 
-      router.replace("/dashboard")
-      router.refresh()
+      window.location.assign("/dashboard")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong")
     } finally {
       setIsLoading(false)
     }
+  }
+
+  if (isCheckingSession) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-6">
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          <Spinner />
+          Checking session...
+        </div>
+      </div>
+    )
   }
 
   return (
